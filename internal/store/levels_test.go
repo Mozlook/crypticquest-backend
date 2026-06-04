@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 )
@@ -56,5 +57,35 @@ func TestListAccessibleLevels(t *testing.T) {
 	}
 	if !got[0].Solved || !got[1].Solved || got[2].Solved {
 		t.Fatalf("solved flags wrong: %+v", got)
+	}
+}
+
+func TestLevelByID(t *testing.T) {
+	s := newTestStore(t)
+	uid, err := s.CreateUser("alice", "hash1")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	res, err := s.db.Exec(
+		`INSERT INTO levels (order_index, title, description, flag) VALUES (10, 'Caesar', 'narrative', 'flag{x}')`,
+	)
+	if err != nil {
+		t.Fatalf("insert level: %v", err)
+	}
+	id, _ := res.LastInsertId()
+
+	d, err := s.LevelByID(uid, id)
+	if err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if d.ID != id || d.Title != "Caesar" || d.Description != "narrative" || d.OrderIndex != 10 {
+		t.Fatalf("unexpected detail: %+v", d)
+	}
+	if d.Solved {
+		t.Fatalf("level should be unsolved")
+	}
+
+	if _, err := s.LevelByID(uid, 9999); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing level: want ErrNotFound, got %v", err)
 	}
 }
