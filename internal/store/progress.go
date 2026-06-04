@@ -2,6 +2,19 @@ package store
 
 import "fmt"
 
+// RecordSolved marks a level solved for a user. Idempotent: INSERT OR IGNORE
+// respects UNIQUE(user_id, level_id), so re-submitting a correct flag for an
+// already-solved level is a harmless no-op.
+func (s *Store) RecordSolved(userID, levelID int64) error {
+	if _, err := s.db.Exec(
+		`INSERT OR IGNORE INTO user_progress (user_id, level_id) VALUES (?, ?)`,
+		userID, levelID,
+	); err != nil {
+		return fmt.Errorf("record solved: %w", err)
+	}
+	return nil
+}
+
 // CurrentLevel returns the player's current level number: the ordinal position
 // of the level they are working on. With strictly linear play that is the count
 // of solved levels plus one, so a fresh account (no progress) is on level 1.

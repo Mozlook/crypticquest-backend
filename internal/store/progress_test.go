@@ -2,6 +2,33 @@ package store
 
 import "testing"
 
+func TestRecordSolvedIdempotent(t *testing.T) {
+	s := newTestStore(t)
+	uid, err := s.CreateUser("alice", "hash1")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	res, err := s.db.Exec(`INSERT INTO levels (order_index, title, description, flag) VALUES (10, 't', 'd', 'flag')`)
+	if err != nil {
+		t.Fatalf("insert level: %v", err)
+	}
+	lid, _ := res.LastInsertId()
+
+	for i := 0; i < 3; i++ {
+		if err := s.RecordSolved(uid, lid); err != nil {
+			t.Fatalf("record solved (call %d): %v", i, err)
+		}
+	}
+
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM user_progress WHERE user_id = ?`, uid).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("want exactly 1 progress row after repeated solves, got %d", count)
+	}
+}
+
 func TestIsLevelAccessible(t *testing.T) {
 	s := newTestStore(t)
 	uid, err := s.CreateUser("alice", "hash1")

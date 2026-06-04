@@ -90,3 +90,21 @@ func (s *Store) LevelByID(userID, levelID int64) (LevelDetail, error) {
 	d.Solved = solved != 0
 	return d, nil
 }
+
+// LevelForSubmit fetches the data needed to validate a flag submission: the
+// order_index (for the access gate) and the server-only flag. This is the one
+// player-flow method that reads the flag, kept separate from the player views
+// so the flag never leaks into a response struct. Returns ErrNotFound if absent.
+func (s *Store) LevelForSubmit(levelID int64) (orderIndex int, flag string, err error) {
+	err = s.db.QueryRow(
+		`SELECT order_index, flag FROM levels WHERE id = ?`,
+		levelID,
+	).Scan(&orderIndex, &flag)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, "", ErrNotFound
+	}
+	if err != nil {
+		return 0, "", fmt.Errorf("level for submit: %w", err)
+	}
+	return orderIndex, flag, nil
+}

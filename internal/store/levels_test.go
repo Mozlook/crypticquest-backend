@@ -89,3 +89,26 @@ func TestLevelByID(t *testing.T) {
 		t.Fatalf("missing level: want ErrNotFound, got %v", err)
 	}
 }
+
+func TestLevelForSubmit(t *testing.T) {
+	s := newTestStore(t)
+	res, err := s.db.Exec(
+		`INSERT INTO levels (order_index, title, description, flag) VALUES (10, 't', 'd', 'flag{x}')`,
+	)
+	if err != nil {
+		t.Fatalf("insert level: %v", err)
+	}
+	id, _ := res.LastInsertId()
+
+	oi, flag, err := s.LevelForSubmit(id)
+	if err != nil {
+		t.Fatalf("for submit: %v", err)
+	}
+	if oi != 10 || flag != "flag{x}" {
+		t.Fatalf("unexpected: oi=%d flag=%q", oi, flag)
+	}
+
+	if _, _, err := s.LevelForSubmit(9999); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing level: want ErrNotFound, got %v", err)
+	}
+}
