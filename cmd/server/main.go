@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"log"
 	"net/http"
 
@@ -9,6 +8,7 @@ import (
 	"crypticquest/internal/auth"
 	"crypticquest/internal/config"
 	"crypticquest/internal/db"
+	"crypticquest/internal/store"
 )
 
 func main() {
@@ -25,7 +25,8 @@ func main() {
 	}
 	log.Printf("database ready at %s (migrations applied)", cfg.DBPath)
 
-	bootstrapAdmin(database, cfg)
+	st := store.New(database)
+	bootstrapAdmin(st, cfg)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
@@ -40,7 +41,7 @@ func main() {
 // bootstrapAdmin creates the first admin account from ADMIN_USERNAME /
 // ADMIN_PASSWORD when configured and no admin exists yet. Non-fatal: a failure
 // here is logged but still lets the server serve players.
-func bootstrapAdmin(database *sql.DB, cfg config.Config) {
+func bootstrapAdmin(st *store.Store, cfg config.Config) {
 	if cfg.AdminUsername == "" || cfg.AdminPassword == "" {
 		return
 	}
@@ -49,7 +50,7 @@ func bootstrapAdmin(database *sql.DB, cfg config.Config) {
 		log.Printf("admin bootstrap: hashing failed: %v", err)
 		return
 	}
-	created, err := db.EnsureAdmin(database, cfg.AdminUsername, hash)
+	created, err := st.EnsureAdmin(cfg.AdminUsername, hash)
 	switch {
 	case err != nil:
 		log.Printf("admin bootstrap: %v", err)
