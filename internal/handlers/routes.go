@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 
+	"crypticquest/internal/middleware"
 	"crypticquest/internal/respond"
 )
 
@@ -12,12 +13,17 @@ import (
 func (h *Handlers) Routes() http.Handler {
 	mux := http.NewServeMux()
 
+	requireLogin := middleware.RequireLogin(h.store, h.cookie)
+
 	mux.HandleFunc("GET /health", health)
 
-	// Auth
+	// Auth (public)
 	mux.HandleFunc("POST /api/register", h.Register)
 	mux.HandleFunc("POST /api/login", h.Login)
 	mux.HandleFunc("POST /api/logout", h.Logout)
+
+	// Authenticated
+	mux.Handle("GET /api/me", requireLogin(http.HandlerFunc(h.Me)))
 
 	return mux
 }
