@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"crypticquest/internal/auth"
+	"crypticquest/internal/respond"
 	"crypticquest/internal/store"
 )
 
@@ -29,11 +30,11 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		respond.Error(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Username == "" || req.Password == "" {
-		writeError(w, http.StatusBadRequest, "username and password are required")
+		respond.Error(w, http.StatusBadRequest, "username and password are required")
 		return
 	}
 
@@ -41,31 +42,31 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			auth.CheckPassword(dummyHash, req.Password) // equalize timing
-			writeError(w, http.StatusUnauthorized, "invalid username or password")
+			respond.Error(w, http.StatusUnauthorized, "invalid username or password")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "could not process login")
+		respond.Error(w, http.StatusInternalServerError, "could not process login")
 		return
 	}
 
 	if !auth.CheckPassword(user.PasswordHash, req.Password) {
-		writeError(w, http.StatusUnauthorized, "invalid username or password")
+		respond.Error(w, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
 
 	token, err := auth.GenerateSessionToken()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create session")
+		respond.Error(w, http.StatusInternalServerError, "could not create session")
 		return
 	}
 	expiresAt := time.Now().Add(auth.SessionTTL)
 	if err := h.store.CreateSession(token, user.ID, expiresAt); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create session")
+		respond.Error(w, http.StatusInternalServerError, "could not create session")
 		return
 	}
 
 	h.cookie.Set(w, token, expiresAt)
-	writeJSON(w, http.StatusOK, map[string]any{
+	respond.JSON(w, http.StatusOK, map[string]any{
 		"id":       user.ID,
 		"username": user.Username,
 		"role":     user.Role,

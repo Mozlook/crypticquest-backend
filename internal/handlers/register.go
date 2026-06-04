@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"crypticquest/internal/auth"
+	"crypticquest/internal/respond"
 	"crypticquest/internal/store"
 )
 
@@ -31,36 +32,36 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 
 	var req registerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		respond.Error(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
 	if l := len(req.Username); l < minUsernameLen || l > maxUsernameLen {
-		writeError(w, http.StatusBadRequest, "username must be 3-32 characters")
+		respond.Error(w, http.StatusBadRequest, "username must be 3-32 characters")
 		return
 	}
 	if l := len(req.Password); l < minPasswordLen || l > maxPasswordLen {
-		writeError(w, http.StatusBadRequest, "password must be 8-72 characters")
+		respond.Error(w, http.StatusBadRequest, "password must be 8-72 characters")
 		return
 	}
 
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not process password")
+		respond.Error(w, http.StatusInternalServerError, "could not process password")
 		return
 	}
 
 	id, err := h.store.CreateUser(req.Username, hash)
 	if err != nil {
 		if errors.Is(err, store.ErrUsernameTaken) {
-			writeError(w, http.StatusConflict, "username already taken")
+			respond.Error(w, http.StatusConflict, "username already taken")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "could not create account")
+		respond.Error(w, http.StatusInternalServerError, "could not create account")
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{
+	respond.JSON(w, http.StatusCreated, map[string]any{
 		"id":       id,
 		"username": req.Username,
 	})

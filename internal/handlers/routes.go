@@ -1,6 +1,10 @@
 package handlers
 
-import "net/http"
+import (
+	"net/http"
+
+	"crypticquest/internal/respond"
+)
 
 // Routes builds the HTTP router with every endpoint registered and returns it
 // as the server's root handler. Keeping routing here, next to the handlers,
@@ -20,5 +24,5 @@ func (h *Handlers) Routes() http.Handler {
 
 // health is a simple liveness check.
 func health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	respond.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
