@@ -8,6 +8,7 @@ import (
 	"crypticquest/internal/auth"
 	"crypticquest/internal/config"
 	"crypticquest/internal/db"
+	"crypticquest/internal/handlers"
 	"crypticquest/internal/store"
 )
 
@@ -28,12 +29,12 @@ func main() {
 	st := store.New(database)
 	bootstrapAdmin(st, cfg)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", healthHandler)
+	cookie := auth.NewSessionCookie(cfg.CookieDomain, cfg.CookieSecure, cfg.CookieSameSite)
+	h := handlers.New(st, cookie)
 
 	addr := ":" + cfg.Port
 	log.Printf("CrypticQuest backend listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, h.Routes()); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }
@@ -59,11 +60,4 @@ func bootstrapAdmin(st *store.Store, cfg config.Config) {
 	default:
 		log.Printf("admin bootstrap: an admin already exists, skipping")
 	}
-}
-
-// healthHandler responds with a simple JSON liveness check.
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
