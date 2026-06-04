@@ -14,3 +14,10 @@ func HashPassword(plaintext string) (string, error) {
 	}
 	return string(hash), nil
 }
+
+// CheckPassword reports whether plaintext matches the stored bcrypt hash.
+// bcrypt re-derives the hash using the salt embedded in storedHash and compares
+// in constant time, so there is no need to (and no way to) decrypt the hash.
+func CheckPassword(storedHash, plaintext string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(plaintext)) == nil
+}
