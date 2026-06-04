@@ -108,3 +108,60 @@ func TestRequireLogin(t *testing.T) {
 		}
 	})
 }
+
+func TestRequireLoginSlidingExpiration(t *testing.T) {
+	st := newTestStore(t)
+	requireLogin := RequireLogin(st, auth.NewSessionCookie("", false, "Lax"))
+	uid, err := st.CreateUser("alice", "hash1")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	pass := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	hit := func(token string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/x", nil)
+		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: token})
+		rec := httptest.NewRecorder()
+		requireLogin(pass).ServeHTTP(rec, req)
+		return rec
+	}
+
+	t.Run("near expiry is extended and cookie refreshed", func(t *testing.T) {
+		near := time.Now().Add(10 * 24 * time.Hour) // inside the 15-day threshold
+		if err := st.CreateSession("near", uid, near); err != nil {
+			t.Fatalf("create session: %v", err)
+		}
+		rec := hit("near")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("want 200, got %d", rec.Code)
+		}
+		sess, _, err := st.SessionByToken("near")
+		if err != nil {
+			t.Fatalf("lookup: %v", err)
+		}
+		if !sess.ExpiresAt.After(near.Add(time.Hour)) {
+			t.Fatalf("expiry not extended: got %v, was %v", sess.ExpiresAt, near)
+		}
+		if len(rec.Result().Cookies()) == 0 {
+			t.Fatal("expected a refreshed session cookie")
+		}
+	})
+
+	t.Run("far expiry is left untouched", func(t *testing.T) {
+		far := time.Now().Add(25 * 24 * time.Hour).Truncate(time.Second) // beyond threshold
+		if err := st.CreateSession("far", uid, far); err != nil {
+			t.Fatalf("create session: %v", err)
+		}
+		rec := hit("far")
+		sess, _, err := st.SessionByToken("far")
+		if err != nil {
+			t.Fatalf("lookup: %v", err)
+		}
+		if !sess.ExpiresAt.Equal(far) {
+			t.Fatalf("expiry should be unchanged: got %v want %v", sess.ExpiresAt, far)
+		}
+		if len(rec.Result().Cookies()) != 0 {
+			t.Fatal("did not expect a refreshed cookie for a far-future session")
+		}
+	})
+}

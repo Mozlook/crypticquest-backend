@@ -10,6 +10,12 @@ import (
 // middleware extends it via sliding expiration while the player is active.
 const SessionTTL = 30 * 24 * time.Hour
 
+// SessionRefreshThreshold is the sliding-expiration trigger: when less than
+// this remains before a session expires, an authenticated request slides the
+// expiry forward by another SessionTTL. An active player never gets logged out;
+// an inactive one eventually expires.
+const SessionRefreshThreshold = 15 * 24 * time.Hour
+
 // GenerateSessionToken returns a cryptographically random, URL-safe session
 // identifier: 32 bytes from crypto/rand, base64url-encoded without padding.
 // crypto/rand (not math/rand) is essential — the token is the only thing

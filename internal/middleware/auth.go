@@ -61,6 +61,15 @@ func RequireLogin(st *store.Store, cookie auth.SessionCookie) func(http.Handler)
 				return
 			}
 
+			if time.Until(sess.ExpiresAt) < auth.SessionRefreshThreshold {
+				newExpiry := time.Now().Add(auth.SessionTTL)
+				if err := st.RefreshSession(sess.Token, newExpiry); err != nil {
+					log.Printf("require-login: refresh session: %v", err)
+				} else {
+					cookie.Set(w, sess.Token, newExpiry)
+				}
+			}
+
 			ctx := context.WithValue(r.Context(), ctxKeyUser, user)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

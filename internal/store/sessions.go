@@ -37,6 +37,18 @@ func (s *Store) DeleteSession(token string) error {
 	return nil
 }
 
+// RefreshSession moves a session's expiry to newExpiresAt (sliding expiration).
+// Stored in the same RFC3339 UTC format as CreateSession for consistency.
+func (s *Store) RefreshSession(token string, newExpiresAt time.Time) error {
+	if _, err := s.db.Exec(
+		`UPDATE sessions SET expires_at = ? WHERE token = ?`,
+		newExpiresAt.UTC().Format(time.RFC3339), token,
+	); err != nil {
+		return fmt.Errorf("refresh session: %w", err)
+	}
+	return nil
+}
+
 // SessionByToken looks up a session and its owning user in a single JOIN.
 // Returns ErrNotFound when the token does not exist. Expiry is deliberately NOT
 // checked here — the auth middleware decides what to do with an expired session.
