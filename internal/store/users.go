@@ -1,6 +1,48 @@
 package store
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
+
+// User roles. SQLite has no enum, so roles are plain strings constrained by
+// convention and validated in code.
+const (
+	RolePlayer = "player"
+	RoleAdmin  = "admin"
+)
+
+// User mirrors a row in the users table. PasswordHash is the bcrypt output and
+// must never be serialized to clients.
+type User struct {
+	ID           int64
+	Username     string
+	PasswordHash string
+	Role         string
+	CreatedAt    time.Time
+}
+
+// CreateUser inserts a new player account (role defaults to 'player' in the
+// schema) and returns its id. If the username is already taken it returns
+// ErrUsernameTaken, relying on the UNIQUE constraint so the check and insert
+// are atomic (no race between a separate "does it exist?" query and the insert).
+func (s *Store) CreateUser(username, passwordHash string) (int64, error) {
+	res, err := s.db.Exec(
+		`INSERT INTO users (username, password_hash) VALUES (?, ?)`,
+		username, passwordHash,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return 0, ErrUsernameTaken
+		}
+		return 0, fmt.Errorf("create user: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("create user (last insert id): %w", err)
+	}
+	return id, nil
+}
 
 // EnsureAdmin bootstraps the first admin account. It is idempotent and safe to
 // call on every startup: if any admin already exists it does nothing. Only when
