@@ -18,3 +18,12 @@ func (s *Store) CreateSession(token string, userID int64, expiresAt time.Time) e
 	}
 	return nil
 }
+
+// DeleteSession removes the session with the given token. Deleting a token that
+// does not exist is not an error (0 rows affected), which keeps logout idempotent.
+func (s *Store) DeleteSession(token string) error {
+	if _, err := s.db.Exec(`DELETE FROM sessions WHERE token = ?`, token); err != nil {
+		return fmt.Errorf("delete session: %w", err)
+	}
+	return nil
+}
