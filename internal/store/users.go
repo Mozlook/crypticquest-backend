@@ -1,9 +1,24 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
+
+// rowScanner is satisfied by both *sql.Row (QueryRow) and *sql.Rows (Query),
+// so a single scan helper serves single-row and multi-row reads alike.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanUser maps one row of the standard user column order into a User.
+func scanUser(row rowScanner) (User, error) {
+	var u User
+	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt)
+	return u, err
+}
 
 // User roles. SQLite has no enum, so roles are plain strings constrained by
 // convention and validated in code.
@@ -66,4 +81,21 @@ func (s *Store) EnsureAdmin(username, passwordHash string) (created bool, err er
 		return false, fmt.Errorf("create admin %q (is the username already taken?): %w", username, err)
 	}
 	return true, nil
+}
+
+// UserByUsername looks up a user by username. Returns ErrNotFound when no such
+// user exists, so callers can distinguish "wrong username" from a real DB error.
+func (s *Store) UserByUsername(username string) (User, error) {
+	row := s.db.QueryRow(
+		`SELECT id, username, password_hash, role, created_at FROM users WHERE username = ?`,
+		username,
+	)
+	u, err := scanUser(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("user by username: %w", err)
+	}
+	return u, nil
 }

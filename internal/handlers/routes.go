@@ -12,6 +12,7 @@ func (h *Handlers) Routes() http.Handler {
 
 	// Auth
 	mux.HandleFunc("POST /api/register", h.Register)
+	mux.HandleFunc("POST /api/login", h.Login)
 
 	return mux
 }

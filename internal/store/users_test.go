@@ -40,3 +40,30 @@ func TestCreateUser(t *testing.T) {
 		t.Fatalf("duplicate username: want ErrUsernameTaken, got %v", err)
 	}
 }
+
+func TestUserByUsername(t *testing.T) {
+	s := newTestStore(t)
+
+	id, err := s.CreateUser("alice", "hash1")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	u, err := s.UserByUsername("alice")
+	if err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if u.ID != id || u.Username != "alice" || u.PasswordHash != "hash1" {
+		t.Fatalf("unexpected user: %+v", u)
+	}
+	if u.Role != RolePlayer {
+		t.Fatalf("want default role %q, got %q", RolePlayer, u.Role)
+	}
+	if u.CreatedAt.IsZero() {
+		t.Fatalf("created_at did not scan into time.Time (zero value)")
+	}
+
+	if _, err := s.UserByUsername("nobody"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing user: want ErrNotFound, got %v", err)
+	}
+}
