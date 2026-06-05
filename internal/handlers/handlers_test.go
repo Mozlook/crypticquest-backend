@@ -331,3 +331,71 @@ func TestAdminHints(t *testing.T) {
 		t.Fatalf("PUT missing: want 404, got %d", w.Code)
 	}
 }
+
+func TestAdminToolsCRUD(t *testing.T) {
+	e := newTestEnv(t)
+	admin := e.authAdmin(t, "boss")
+
+	// Gating.
+	player := e.authUser(t, "alice")
+	if w := e.do(t, http.MethodGet, "/api/admin/tools", "", player); w.Code != http.StatusForbidden {
+		t.Fatalf("player list tools: want 403, got %d", w.Code)
+	}
+
+	// Create.
+	w := e.do(t, http.MethodPost, "/api/admin/tools", `{"type":"link","title":"CyberChef","description":"swiss army","content":"http://x"}`, admin)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: want 201, got %d %s", w.Code, w.Body.String())
+	}
+	var tool store.Tool
+	mustJSON(t, w, &tool)
+	if tool.ID == 0 || tool.Type != "link" {
+		t.Fatalf("created tool: %+v", tool)
+	}
+	sid := strconv.FormatInt(tool.ID, 10)
+
+	// Invalid type -> 400.
+	if w := e.do(t, http.MethodPost, "/api/admin/tools", `{"type":"bogus","title":"x","content":"y"}`, admin); w.Code != http.StatusBadRequest {
+		t.Fatalf("bad type: want 400, got %d", w.Code)
+	}
+	// Missing content -> 400.
+	if w := e.do(t, http.MethodPost, "/api/admin/tools", `{"type":"pdf","title":"x","content":""}`, admin); w.Code != http.StatusBadRequest {
+		t.Fatalf("empty content: want 400, got %d", w.Code)
+	}
+
+	// List.
+	if w := e.do(t, http.MethodGet, "/api/admin/tools", "", admin); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "CyberChef") {
+		t.Fatalf("list: %d %s", w.Code, w.Body.String())
+	}
+
+	// Update.
+	w = e.do(t, http.MethodPut, "/api/admin/tools/"+sid, `{"type":"pdf","title":"Guide","description":"","content":"guide.pdf"}`, admin)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update: want 200, got %d %s", w.Code, w.Body.String())
+	}
+	mustJSON(t, w, &tool)
+	if tool.Type != "pdf" || tool.Content != "guide.pdf" {
+		t.Fatalf("update not applied: %+v", tool)
+	}
+	if w := e.do(t, http.MethodPut, "/api/admin/tools/9999", `{"type":"link","title":"x","content":"y"}`, admin); w.Code != http.StatusNotFound {
+		t.Fatalf("update missing: want 404, got %d", w.Code)
+	}
+
+	// A level unlocking the tool blocks deletion -> 409.
+	if _, err := e.db.Exec(`INSERT INTO levels (order_index, title, description, flag, unlocks_tool_id) VALUES (10, 'L', 'd', 'f', ?)`, tool.ID); err != nil {
+		t.Fatalf("insert referencing level: %v", err)
+	}
+	if w := e.do(t, http.MethodDelete, "/api/admin/tools/"+sid, "", admin); w.Code != http.StatusConflict {
+		t.Fatalf("delete referenced: want 409, got %d", w.Code)
+	}
+	// Detach, then delete -> 204, then 404.
+	if _, err := e.db.Exec(`UPDATE levels SET unlocks_tool_id = NULL`); err != nil {
+		t.Fatalf("detach: %v", err)
+	}
+	if w := e.do(t, http.MethodDelete, "/api/admin/tools/"+sid, "", admin); w.Code != http.StatusNoContent {
+		t.Fatalf("delete: want 204, got %d", w.Code)
+	}
+	if w := e.do(t, http.MethodDelete, "/api/admin/tools/"+sid, "", admin); w.Code != http.StatusNotFound {
+		t.Fatalf("delete again: want 404, got %d", w.Code)
+	}
+}

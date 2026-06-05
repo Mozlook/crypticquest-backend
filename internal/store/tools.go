@@ -1,6 +1,10 @@
 package store
 
-import "fmt"
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+)
 
 // Tool is the player-facing view of a toolkit entry. Tools carry no secrets
 // (no flag here, unlike levels), so every column is safe to expose. Description
@@ -67,4 +71,104 @@ func (s *Store) IsToolFileUnlocked(userID int64, path string) (bool, error) {
 		return false, fmt.Errorf("is tool file unlocked: %w", err)
 	}
 	return unlocked, nil
+}
+
+// --- Admin surface ----------------------------------------------------------
+//
+// Tools carry no secrets, so the admin and player views share the Tool struct;
+// the difference is only scope (all tools vs unlocked) and the write methods.
+
+// ToolInput is the writable subset of a tool (no id, which the DB owns).
+type ToolInput struct {
+	Type        string
+	Title       string
+	Description string
+	Content     string
+}
+
+// ListAllTools returns every tool ordered by id, for the admin list.
+func (s *Store) ListAllTools() ([]Tool, error) {
+	rows, err := s.db.Query(
+		`SELECT id, type, title, COALESCE(description, ''), content FROM tools ORDER BY id`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list all tools: %w", err)
+	}
+	defer rows.Close()
+
+	tools := []Tool{} // non-nil so JSON encodes [] not null
+	for rows.Next() {
+		var t Tool
+		if err := rows.Scan(&t.ID, &t.Type, &t.Title, &t.Description, &t.Content); err != nil {
+			return nil, fmt.Errorf("scan tool: %w", err)
+		}
+		tools = append(tools, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tools: %w", err)
+	}
+	return tools, nil
+}
+
+// ToolByID returns one tool, or ErrNotFound.
+func (s *Store) ToolByID(id int64) (Tool, error) {
+	var t Tool
+	err := s.db.QueryRow(
+		`SELECT id, type, title, COALESCE(description, ''), content FROM tools WHERE id = ?`,
+		id,
+	).Scan(&t.ID, &t.Type, &t.Title, &t.Description, &t.Content)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Tool{}, ErrNotFound
+	}
+	if err != nil {
+		return Tool{}, fmt.Errorf("tool by id: %w", err)
+	}
+	return t, nil
+}
+
+// CreateTool inserts a tool and returns its new id.
+func (s *Store) CreateTool(in ToolInput) (int64, error) {
+	res, err := s.db.Exec(
+		`INSERT INTO tools (type, title, description, content) VALUES (?, ?, ?, ?)`,
+		in.Type, in.Title, in.Description, in.Content,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("create tool: %w", err)
+	}
+	id, _ := res.LastInsertId()
+	return id, nil
+}
+
+// UpdateTool overwrites a tool by id. Returns ErrNotFound if no such tool.
+func (s *Store) UpdateTool(id int64, in ToolInput) error {
+	res, err := s.db.Exec(
+		`UPDATE tools SET type = ?, title = ?, description = ?, content = ? WHERE id = ?`,
+		in.Type, in.Title, in.Description, in.Content, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update tool: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteTool removes a tool by id. Returns ErrNotFound if there was nothing to
+// delete, and ErrReferenced if a level still unlocks it — levels.unlocks_tool_id
+// is a RESTRICT foreign key, so the delete is blocked rather than orphaning it.
+func (s *Store) DeleteTool(id int64) error {
+	res, err := s.db.Exec(`DELETE FROM tools WHERE id = ?`, id)
+	if err != nil {
+		if isForeignKeyViolation(err) {
+			return ErrReferenced
+		}
+		return fmt.Errorf("delete tool: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

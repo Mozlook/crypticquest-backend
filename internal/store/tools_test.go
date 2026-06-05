@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestIsToolFileUnlocked(t *testing.T) {
 	s := newTestStore(t)
@@ -151,5 +154,57 @@ func TestUnlockedTools(t *testing.T) {
 	// toolB had a NULL description -> COALESCE should give "".
 	if got[1].Description != "" {
 		t.Fatalf("toolB null description should flatten to empty, got %q", got[1].Description)
+	}
+}
+
+func TestAdminToolCRUD(t *testing.T) {
+	s := newTestStore(t)
+
+	id, err := s.CreateTool(ToolInput{Type: "link", Title: "CyberChef", Description: "swiss army", Content: "http://x"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := s.ToolByID(id)
+	if err != nil || got.Title != "CyberChef" || got.Type != "link" || got.Description != "swiss army" {
+		t.Fatalf("by id: %+v err=%v", got, err)
+	}
+
+	if err := s.UpdateTool(id, ToolInput{Type: "pdf", Title: "Guide", Description: "", Content: "guide.pdf"}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, _ = s.ToolByID(id)
+	if got.Type != "pdf" || got.Title != "Guide" || got.Description != "" || got.Content != "guide.pdf" {
+		t.Fatalf("after update: %+v", got)
+	}
+
+	if err := s.UpdateTool(9999, ToolInput{Type: "link", Title: "x", Content: "y"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("update missing: want ErrNotFound, got %v", err)
+	}
+
+	all, err := s.ListAllTools()
+	if err != nil || len(all) != 1 || all[0].ID != id {
+		t.Fatalf("list all: %+v err=%v", all, err)
+	}
+
+	// A level unlocking the tool blocks its deletion (RESTRICT FK -> ErrReferenced).
+	if _, err := s.db.Exec(
+		`INSERT INTO levels (order_index, title, description, flag, unlocks_tool_id) VALUES (10, 'L', 'd', 'f', ?)`, id,
+	); err != nil {
+		t.Fatalf("insert referencing level: %v", err)
+	}
+	if err := s.DeleteTool(id); !errors.Is(err, ErrReferenced) {
+		t.Fatalf("delete referenced: want ErrReferenced, got %v", err)
+	}
+
+	// Remove the reference, then delete succeeds; second delete is 404.
+	if _, err := s.db.Exec(`UPDATE levels SET unlocks_tool_id = NULL WHERE unlocks_tool_id = ?`, id); err != nil {
+		t.Fatalf("clear ref: %v", err)
+	}
+	if err := s.DeleteTool(id); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if err := s.DeleteTool(id); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete again: want ErrNotFound, got %v", err)
 	}
 }
