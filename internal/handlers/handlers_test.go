@@ -275,3 +275,59 @@ func TestAdminLevelsCRUD(t *testing.T) {
 		t.Fatalf("delete again: want 404, got %d", w.Code)
 	}
 }
+
+func TestAdminHints(t *testing.T) {
+	e := newTestEnv(t)
+	admin := e.authAdmin(t, "boss")
+	id := e.insertLevel(t, 10, "Caesar", "flag{a}")
+	sid := strconv.FormatInt(id, 10)
+	base := "/api/admin/levels/" + sid + "/hints"
+
+	// Gating: player denied.
+	player := e.authUser(t, "alice")
+	if w := e.do(t, http.MethodPut, base, `{"hints":["x"]}`, player); w.Code != http.StatusForbidden {
+		t.Fatalf("player PUT hints: want 403, got %d", w.Code)
+	}
+
+	// Initially empty.
+	if w := e.do(t, http.MethodGet, base, "", admin); w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != "[]" {
+		t.Fatalf("initial GET: want [], got %d %s", w.Code, w.Body.String())
+	}
+
+	// Replace with two, ordered.
+	w := e.do(t, http.MethodPut, base, `{"hints":["first","second"]}`, admin)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT: want 200, got %d %s", w.Code, w.Body.String())
+	}
+	var hints []store.Hint
+	mustJSON(t, w, &hints)
+	if len(hints) != 2 || hints[0].Text != "first" || hints[1].Text != "second" {
+		t.Fatalf("hints not in order: %+v", hints)
+	}
+
+	// Reorder/shrink to one.
+	w = e.do(t, http.MethodPut, base, `{"hints":["only"]}`, admin)
+	mustJSON(t, w, &hints)
+	if len(hints) != 1 || hints[0].Text != "only" {
+		t.Fatalf("after shrink: %+v", hints)
+	}
+
+	// Empty clears all.
+	w = e.do(t, http.MethodPut, base, `{"hints":[]}`, admin)
+	if strings.TrimSpace(w.Body.String()) != "[]" {
+		t.Fatalf("clear: want [], got %s", w.Body.String())
+	}
+
+	// Empty hint text -> 400.
+	if w := e.do(t, http.MethodPut, base, `{"hints":["ok","  "]}`, admin); w.Code != http.StatusBadRequest {
+		t.Fatalf("empty hint text: want 400, got %d", w.Code)
+	}
+
+	// Missing level -> 404 on both GET and PUT.
+	if w := e.do(t, http.MethodGet, "/api/admin/levels/9999/hints", "", admin); w.Code != http.StatusNotFound {
+		t.Fatalf("GET missing: want 404, got %d", w.Code)
+	}
+	if w := e.do(t, http.MethodPut, "/api/admin/levels/9999/hints", `{"hints":["x"]}`, admin); w.Code != http.StatusNotFound {
+		t.Fatalf("PUT missing: want 404, got %d", w.Code)
+	}
+}

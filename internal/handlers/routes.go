@@ -40,6 +40,8 @@ func (h *Handlers) Routes() http.Handler {
 	mux.Handle("POST /api/admin/levels", requireAdmin(http.HandlerFunc(h.AdminCreateLevel)))
 	mux.Handle("PUT /api/admin/levels/{id}", requireAdmin(http.HandlerFunc(h.AdminUpdateLevel)))
 	mux.Handle("DELETE /api/admin/levels/{id}", requireAdmin(http.HandlerFunc(h.AdminDeleteLevel)))
+	mux.Handle("GET /api/admin/levels/{id}/hints", requireAdmin(http.HandlerFunc(h.AdminGetHints)))
+	mux.Handle("PUT /api/admin/levels/{id}/hints", requireAdmin(http.HandlerFunc(h.AdminReplaceHints)))
 
 	return mux
 }

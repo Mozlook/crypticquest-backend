@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestHintsForLevel(t *testing.T) {
 	s := newTestStore(t)
@@ -66,5 +69,45 @@ func TestHintsForLevel(t *testing.T) {
 	}
 	if got == nil || len(got) != 0 {
 		t.Fatalf("want empty non-nil slice, got %+v", got)
+	}
+}
+
+func TestReplaceHints(t *testing.T) {
+	s := newTestStore(t)
+	res, err := s.db.Exec(`INSERT INTO levels (order_index, title, description, flag) VALUES (10, 'L', 'd', 'f')`)
+	if err != nil {
+		t.Fatalf("insert level: %v", err)
+	}
+	levelID, _ := res.LastInsertId()
+
+	// Replace with three -> stored in order 1,2,3.
+	if err := s.ReplaceHints(levelID, []string{"first", "second", "third"}); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	got, _ := s.HintsForLevel(levelID)
+	if len(got) != 3 || got[0].Text != "first" || got[2].Text != "third" {
+		t.Fatalf("after replace: %+v", got)
+	}
+
+	// Replace again with a reordered, shorter list -> old ones gone, reindexed.
+	if err := s.ReplaceHints(levelID, []string{"only-a", "only-b"}); err != nil {
+		t.Fatalf("replace 2: %v", err)
+	}
+	got, _ = s.HintsForLevel(levelID)
+	if len(got) != 2 || got[0].Text != "only-a" || got[1].Text != "only-b" {
+		t.Fatalf("after replace 2: %+v", got)
+	}
+
+	// Empty slice clears all.
+	if err := s.ReplaceHints(levelID, []string{}); err != nil {
+		t.Fatalf("replace empty: %v", err)
+	}
+	if got, _ = s.HintsForLevel(levelID); len(got) != 0 {
+		t.Fatalf("want cleared, got %+v", got)
+	}
+
+	// Missing level -> ErrNotFound (and nothing inserted).
+	if err := s.ReplaceHints(9999, []string{"x"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing level: want ErrNotFound, got %v", err)
 	}
 }

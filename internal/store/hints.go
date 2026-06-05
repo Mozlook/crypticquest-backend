@@ -1,6 +1,10 @@
 package store
 
-import "fmt"
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+)
 
 // Hint is the player-facing view of a single hint. Hints carry no secrets, so
 // the text is safe to expose. The raw order_index is internal (like a level's),
@@ -36,4 +40,38 @@ func (s *Store) HintsForLevel(levelID int64) ([]Hint, error) {
 		return nil, fmt.Errorf("iterate hints: %w", err)
 	}
 	return hints, nil
+}
+
+// ReplaceHints replaces all of a level's hints with the given ordered texts, in
+// one transaction: the slice position becomes order_index (1-based), so this one
+// call covers add, remove, and reorder. An empty slice clears all hints. Returns
+// ErrNotFound if the level does not exist (so the admin handler can answer 404).
+func (s *Store) ReplaceHints(levelID int64, texts []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("replace hints: %w", err)
+	}
+	defer tx.Rollback() // no-op after a successful Commit
+
+	var one int
+	err = tx.QueryRow(`SELECT 1 FROM levels WHERE id = ?`, levelID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("replace hints: lookup level: %w", err)
+	}
+
+	if _, err := tx.Exec(`DELETE FROM hints WHERE level_id = ?`, levelID); err != nil {
+		return fmt.Errorf("replace hints: clear: %w", err)
+	}
+	for i, text := range texts {
+		if _, err := tx.Exec(
+			`INSERT INTO hints (level_id, order_index, text) VALUES (?, ?, ?)`,
+			levelID, i+1, text,
+		); err != nil {
+			return fmt.Errorf("replace hints: insert %d: %w", i+1, err)
+		}
+	}
+	return tx.Commit()
 }
