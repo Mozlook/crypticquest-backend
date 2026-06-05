@@ -26,6 +26,7 @@ func (h *Handlers) Routes() http.Handler {
 	mux.Handle("GET /api/me", requireLogin(http.HandlerFunc(h.Me)))
 	mux.Handle("GET /api/levels", requireLogin(http.HandlerFunc(h.ListLevels)))
 	mux.Handle("GET /api/levels/{id}", requireLogin(http.HandlerFunc(h.GetLevel)))
+	mux.Handle("GET /api/levels/{id}/hints", requireLogin(http.HandlerFunc(h.GetHints)))
 	mux.Handle("POST /api/levels/{id}/submit", requireLogin(http.HandlerFunc(h.SubmitFlag)))
 	mux.Handle("GET /api/tools", requireLogin(http.HandlerFunc(h.ListTools)))
 
