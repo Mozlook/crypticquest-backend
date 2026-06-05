@@ -10,12 +10,13 @@ import (
 
 // Handlers bundles the dependencies shared by all HTTP handlers.
 type Handlers struct {
-	store    *store.Store
-	cookie   auth.SessionCookie
-	filesDir string // base directory for gated downloads (files/levels, files/tools)
+	store         *store.Store
+	cookie        auth.SessionCookie
+	filesDir      string // base directory for gated downloads (files/levels, files/tools)
+	allowedOrigin string // the single CORS origin echoed for credentialed requests
 }
 
 // New constructs the handler set.
-func New(st *store.Store, cookie auth.SessionCookie, filesDir string) *Handlers {
-	return &Handlers{store: st, cookie: cookie, filesDir: filesDir}
+func New(st *store.Store, cookie auth.SessionCookie, filesDir, allowedOrigin string) *Handlers {
+	return &Handlers{store: st, cookie: cookie, filesDir: filesDir, allowedOrigin: allowedOrigin}
 }

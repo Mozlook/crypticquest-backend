@@ -51,7 +51,9 @@ func (h *Handlers) Routes() http.Handler {
 	mux.Handle("POST /api/admin/users/{id}/reset-password", requireAdmin(http.HandlerFunc(h.AdminResetPassword)))
 	mux.Handle("DELETE /api/admin/users/{id}", requireAdmin(http.HandlerFunc(h.AdminDeleteUser)))
 
-	return mux
+	// CORS wraps the whole router so it also covers OPTIONS preflight, which
+	// matches no route on its own.
+	return middleware.CORS(h.allowedOrigin)(mux)
 }
 
 // health is a simple liveness check.

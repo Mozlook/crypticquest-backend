@@ -39,7 +39,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		t.Fatalf("migrate: %v", err)
 	}
 	st := store.New(database)
-	h := New(st, auth.NewSessionCookie("", false, "Lax"), t.TempDir())
+	h := New(st, auth.NewSessionCookie("", false, "Lax"), t.TempDir(), "https://app.example.com")
 	return &testEnv{router: h.Routes(), db: database, st: st}
 }
 
