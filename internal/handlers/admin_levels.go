@@ -30,11 +30,20 @@ func (req adminLevelRequest) toInput() (store.AdminLevelInput, string) {
 	if strings.TrimSpace(req.Title) == "" {
 		return store.AdminLevelInput{}, "title is required"
 	}
+	if len(req.Title) > maxTitleLen {
+		return store.AdminLevelInput{}, "title is too long"
+	}
 	if strings.TrimSpace(req.Description) == "" {
 		return store.AdminLevelInput{}, "description is required"
 	}
+	if len(req.Description) > maxLevelDescLen {
+		return store.AdminLevelInput{}, "description is too long"
+	}
 	if req.Flag == "" {
 		return store.AdminLevelInput{}, "flag is required"
+	}
+	if len(req.Flag) > maxFlagLen {
+		return store.AdminLevelInput{}, "flag is too long"
 	}
 	return store.AdminLevelInput{
 		OrderIndex:    req.OrderIndex,

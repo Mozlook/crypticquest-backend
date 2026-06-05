@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 
 	"crypticquest/internal/auth"
 	"crypticquest/internal/respond"
@@ -18,6 +19,11 @@ const (
 	// rejected rather than silently truncated.
 	maxPasswordLen = 72
 )
+
+// usernamePattern restricts usernames to letters, digits, and a few separators.
+// This rejects whitespace (including an all-spaces name that would pass a length
+// check), control characters, and anything that could confuse display or lookup.
+var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 type registerRequest struct {
 	Username string `json:"username"`
@@ -38,6 +44,10 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 
 	if l := len(req.Username); l < minUsernameLen || l > maxUsernameLen {
 		respond.Error(w, http.StatusBadRequest, "username must be 3-32 characters")
+		return
+	}
+	if !usernamePattern.MatchString(req.Username) {
+		respond.Error(w, http.StatusBadRequest, "username may contain only letters, digits, '.', '_' and '-'")
 		return
 	}
 	if l := len(req.Password); l < minPasswordLen || l > maxPasswordLen {

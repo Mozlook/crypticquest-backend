@@ -503,3 +503,57 @@ func mustUserID(t *testing.T, e *testEnv, username string) int64 {
 	}
 	return u.ID
 }
+
+func TestRegisterValidation(t *testing.T) {
+	e := newTestEnv(t)
+	reg := func(body string) int {
+		return e.do(t, http.MethodPost, "/api/register", body, nil).Code
+	}
+
+	cases := []struct {
+		name, body string
+		want       int
+	}{
+		{"valid", `{"username":"alice_01","password":"hunter2pass"}`, http.StatusCreated},
+		{"username with spaces", `{"username":"al ice","password":"hunter2pass"}`, http.StatusBadRequest},
+		{"all-spaces username", `{"username":"   ","password":"hunter2pass"}`, http.StatusBadRequest},
+		{"username with symbol", `{"username":"al!ce","password":"hunter2pass"}`, http.StatusBadRequest},
+		{"username too short", `{"username":"ab","password":"hunter2pass"}`, http.StatusBadRequest},
+		{"password too short", `{"username":"bob","password":"short"}`, http.StatusBadRequest},
+		{"dotted-dashed ok", `{"username":"a.b-c_d","password":"hunter2pass"}`, http.StatusCreated},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := reg(tc.body); got != tc.want {
+				t.Fatalf("body %s: got %d, want %d", tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAdminWriteLengthCaps(t *testing.T) {
+	e := newTestEnv(t)
+	admin := e.authAdmin(t, "boss")
+	long := strings.Repeat("x", maxTitleLen+1)
+
+	// Level with an over-long title -> 400.
+	body := `{"order_index":10,"title":"` + long + `","description":"d","flag":"f"}`
+	if w := e.do(t, http.MethodPost, "/api/admin/levels", body, admin); w.Code != http.StatusBadRequest {
+		t.Fatalf("long level title: want 400, got %d", w.Code)
+	}
+
+	// Tool with over-long content -> 400.
+	longContent := strings.Repeat("y", maxToolContentLen+1)
+	tbody := `{"type":"link","title":"t","content":"` + longContent + `"}`
+	if w := e.do(t, http.MethodPost, "/api/admin/tools", tbody, admin); w.Code != http.StatusBadRequest {
+		t.Fatalf("long tool content: want 400, got %d", w.Code)
+	}
+
+	// Hint over-long -> 400 (need a real level first).
+	id := e.insertLevel(t, 20, "L", "f")
+	longHint := strings.Repeat("z", maxHintLen+1)
+	hbody := `{"hints":["` + longHint + `"]}`
+	if w := e.do(t, http.MethodPut, "/api/admin/levels/"+strconv.FormatInt(id, 10)+"/hints", hbody, admin); w.Code != http.StatusBadRequest {
+		t.Fatalf("long hint: want 400, got %d", w.Code)
+	}
+}

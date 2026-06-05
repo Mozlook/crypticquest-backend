@@ -58,6 +58,10 @@ func (h *Handlers) AdminReplaceHints(w http.ResponseWriter, r *http.Request) {
 			respond.Error(w, http.StatusBadRequest, "hint text must not be empty")
 			return
 		}
+		if len(text) > maxHintLen {
+			respond.Error(w, http.StatusBadRequest, "hint text is too long")
+			return
+		}
 	}
 
 	if err := h.store.ReplaceHints(id, req.Hints); err != nil {

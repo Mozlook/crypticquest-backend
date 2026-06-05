@@ -30,8 +30,17 @@ func (req adminToolRequest) toInput() (store.ToolInput, string) {
 	if strings.TrimSpace(req.Title) == "" {
 		return store.ToolInput{}, "title is required"
 	}
+	if len(req.Title) > maxTitleLen {
+		return store.ToolInput{}, "title is too long"
+	}
 	if strings.TrimSpace(req.Content) == "" {
 		return store.ToolInput{}, "content is required"
+	}
+	if len(req.Content) > maxToolContentLen {
+		return store.ToolInput{}, "content is too long"
+	}
+	if len(req.Description) > maxToolDescLen {
+		return store.ToolInput{}, "description is too long"
 	}
 	return store.ToolInput{
 		Type:        req.Type,
