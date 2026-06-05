@@ -1,0 +1,24 @@
+# CrypticQuest backend — single service behind a host reverse proxy.
+# Deploy:  cp .env.example .env  &&  edit .env  &&  docker compose up -d --build
+services:
+  backend:
+    build: .
+    image: crypticquest-backend:latest
+    container_name: crypticquest-backend
+    restart: unless-stopped
+    env_file: .env
+    # Published only on loopback: the host's reverse proxy (nginx/Caddy/Traefik)
+    # terminates HTTPS and proxies to 127.0.0.1:8080. The container is never
+    # exposed to the public internet directly.
+    #
+    # If your proxy runs in Docker instead, drop this `ports` block and put both
+    # on a shared network, then proxy to http://backend:8080.
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # Named volume mounted as a DIRECTORY (not a single file): SQLite WAL mode
+      # writes ctf.db plus ctf.db-wal / ctf.db-shm next to it.
+      - cq-data:/data
+
+volumes:
+  cq-data:

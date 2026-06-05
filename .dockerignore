@@ -1,0 +1,20 @@
+# Keep the build context small and free of local/runtime cruft.
+.git
+.gitignore
+README.md
+Dockerfile
+.dockerignore
+
+# Local databases (the prod DB lives in the /data volume).
+*.db
+*.db-wal
+*.db-shm
+
+# Local env files.
+.env
+.env.local
+*.local.env
+
+# OS / editor cruft.
+.DS_Store
+*.swp
