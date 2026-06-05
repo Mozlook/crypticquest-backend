@@ -1,0 +1,59 @@
+{
+  "tools": [
+    {
+      "key": "cyberchef",
+      "type": "link",
+      "title": "CyberChef",
+      "description": "The Swiss-army knife for encodings and ciphers — bake a recipe to decode almost anything.",
+      "content": "https://gchq.github.io/CyberChef/"
+    },
+    {
+      "key": "ascii-table",
+      "type": "pdf",
+      "title": "ASCII table",
+      "description": "Reference sheet mapping characters to their decimal and hexadecimal codes.",
+      "content": "ascii-table.pdf"
+    }
+  ],
+  "levels": [
+    {
+      "order_index": 10,
+      "title": "Welcome, agent",
+      "description": "Your first message was shifted a fixed number of places through the alphabet. Decrypt 'uftu1' (a Caesar cipher) and submit the original word.",
+      "flag": "test1",
+      "unlocks_tool": "cyberchef",
+      "hints": [
+        "Every letter moved by the same amount — try all 25 shifts.",
+        "The shift is 1: step each letter back by one."
+      ]
+    },
+    {
+      "order_index": 20,
+      "title": "Just a different writing",
+      "description": "This is not a cipher, only another way of writing bytes. Decode 'dGVzdDI=' and submit the result.",
+      "flag": "test2",
+      "unlocks_tool": null,
+      "hints": [
+        "The trailing '=' is the giveaway: it is Base64."
+      ]
+    },
+    {
+      "order_index": 30,
+      "title": "Check the attachment",
+      "description": "The message did not fit in the brief — it is in an attached file. Download the file served for this level and read the flag inside.",
+      "flag": "test3",
+      "unlocks_tool": null,
+      "hints": [
+        "Fetch the file from this level's file route, then open it."
+      ]
+    },
+    {
+      "order_index": 40,
+      "title": "Know your codes",
+      "description": "A short consolidation level. Solve it to earn a reference tool — the flag is simply 'test4'.",
+      "flag": "test4",
+      "unlocks_tool": "ascii-table",
+      "hints": []
+    }
+  ]
+}
