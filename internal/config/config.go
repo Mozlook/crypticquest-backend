@@ -14,6 +14,10 @@ type Config struct {
 	Port string
 	// DBPath is the filesystem path to the SQLite database file.
 	DBPath string
+	// FilesDir is the base directory holding gated downloads, with the layout
+	// files/levels/{id}/ and files/tools/. Served only through the authorization
+	// gate, never a bare FileServer.
+	FilesDir string
 	// AllowedOrigin is the single frontend origin permitted by CORS.
 	// With credentialed requests the wildcard "*" is forbidden, so this
 	// must be an explicit origin (e.g. https://app.example.com).
@@ -35,6 +39,7 @@ func Load() Config {
 	return Config{
 		Port:           getEnv("PORT", "8080"),
 		DBPath:         getEnv("DB_PATH", "ctf.db"),
+		FilesDir:       getEnv("FILES_DIR", "files"),
 		AllowedOrigin:  getEnv("ALLOWED_ORIGIN", "http://localhost:5173"),
 		CookieDomain:   getEnv("COOKIE_DOMAIN", ""),
 		CookieSecure:   getEnvBool("COOKIE_SECURE", false),

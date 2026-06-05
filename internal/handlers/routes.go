@@ -30,6 +30,9 @@ func (h *Handlers) Routes() http.Handler {
 	mux.Handle("POST /api/levels/{id}/submit", requireLogin(http.HandlerFunc(h.SubmitFlag)))
 	mux.Handle("GET /api/tools", requireLogin(http.HandlerFunc(h.ListTools)))
 
+	// Gated downloads (outside /api/, but still authenticated for the gate)
+	mux.Handle("GET /files/levels/{id}/{path...}", requireLogin(http.HandlerFunc(h.ServeLevelFile)))
+
 	return mux
 }
 
