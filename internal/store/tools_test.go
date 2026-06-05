@@ -2,6 +2,67 @@ package store
 
 import "testing"
 
+func TestIsToolFileUnlocked(t *testing.T) {
+	s := newTestStore(t)
+	uid, err := s.CreateUser("alice", "hash1")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	// A pdf tool whose content is the file path, and a link tool (URL content).
+	res, err := s.db.Exec(
+		`INSERT INTO tools (type, title, content) VALUES ('pdf', 'nmap guide', 'nmap-cheatsheet.pdf')`,
+	)
+	if err != nil {
+		t.Fatalf("insert pdf tool: %v", err)
+	}
+	pdfTool, _ := res.LastInsertId()
+	res, err = s.db.Exec(
+		`INSERT INTO tools (type, title, content) VALUES ('pdf', 'sha guide', 'sha-explained.pdf')`,
+	)
+	if err != nil {
+		t.Fatalf("insert second pdf tool: %v", err)
+	}
+	lockedTool, _ := res.LastInsertId()
+
+	// L10 unlocks the nmap pdf, L20 unlocks the sha pdf.
+	res, err = s.db.Exec(
+		`INSERT INTO levels (order_index, title, description, flag, unlocks_tool_id) VALUES (10, 'L10', 'd', 'flag', ?)`,
+		pdfTool,
+	)
+	if err != nil {
+		t.Fatalf("insert level: %v", err)
+	}
+	l10, _ := res.LastInsertId()
+	if _, err := s.db.Exec(
+		`INSERT INTO levels (order_index, title, description, flag, unlocks_tool_id) VALUES (20, 'L20', 'd', 'flag', ?)`,
+		lockedTool,
+	); err != nil {
+		t.Fatalf("insert locked level: %v", err)
+	}
+
+	// Nothing solved yet -> nothing unlocked.
+	if ok, err := s.IsToolFileUnlocked(uid, "nmap-cheatsheet.pdf"); err != nil || ok {
+		t.Fatalf("before solving: want false, got ok=%v err=%v", ok, err)
+	}
+
+	// Solve L10 -> nmap pdf unlocked, sha pdf still locked, unknown path false.
+	if _, err := s.db.Exec(
+		`INSERT INTO user_progress (user_id, level_id) VALUES (?, ?)`, uid, l10,
+	); err != nil {
+		t.Fatalf("solve L10: %v", err)
+	}
+	if ok, err := s.IsToolFileUnlocked(uid, "nmap-cheatsheet.pdf"); err != nil || !ok {
+		t.Fatalf("nmap after L10: want true, got ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.IsToolFileUnlocked(uid, "sha-explained.pdf"); err != nil || ok {
+		t.Fatalf("sha (level not solved): want false, got ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.IsToolFileUnlocked(uid, "does-not-exist.pdf"); err != nil || ok {
+		t.Fatalf("unknown path: want false, got ok=%v err=%v", ok, err)
+	}
+}
+
 func TestUnlockedTools(t *testing.T) {
 	s := newTestStore(t)
 	uid, err := s.CreateUser("alice", "hash1")

@@ -55,6 +55,33 @@ func (h *Handlers) ServeLevelFile(w http.ResponseWriter, r *http.Request) {
 	h.serveFile(w, r, base, r.PathValue("path"))
 }
 
+// ServeToolFile handles GET /files/tools/{path...}: a toolkit material (PDF),
+// gated by whether the user has unlocked a tool pointing at this file. Unlike
+// the level route there is no id to look up — the gate is the path itself, so a
+// path that matches no earned tool is refused with 403 (which also avoids
+// revealing whether a future tool's file exists on disk).
+func (h *Handlers) ServeToolFile(w http.ResponseWriter, r *http.Request) {
+	user, ok := middleware.UserFromContext(r.Context())
+	if !ok {
+		respond.Error(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	reqPath := r.PathValue("path")
+	unlocked, err := h.store.IsToolFileUnlocked(user.ID, reqPath)
+	if err != nil {
+		respond.Error(w, http.StatusInternalServerError, "could not serve file")
+		return
+	}
+	if !unlocked {
+		respond.Error(w, http.StatusForbidden, "tool locked")
+		return
+	}
+
+	base := filepath.Join(h.filesDir, "tools")
+	h.serveFile(w, r, base, reqPath)
+}
+
 // serveFile opens reqPath confined to base and streams it. Shared by the gated
 // /files/* handlers; the access gate is the caller's job, this only enforces
 // path confinement and streams the bytes (with content-type, Last-Modified and
