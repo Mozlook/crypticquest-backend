@@ -75,3 +75,22 @@ func RequireLogin(st *store.Store, cookie auth.SessionCookie) func(http.Handler)
 		})
 	}
 }
+
+// RequireAdmin returns middleware that admits only authenticated admins. It
+// layers on RequireLogin (session first), then checks the role, so the order is
+// 401 for no/invalid session, 403 for a valid session that is not an admin. The
+// downstream handler still finds the user via UserFromContext.
+func RequireAdmin(st *store.Store, cookie auth.SessionCookie) func(http.Handler) http.Handler {
+	login := RequireLogin(st, cookie)
+	return func(next http.Handler) http.Handler {
+		// login runs first; only if it admits the request does the role check run.
+		return login(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user, ok := UserFromContext(r.Context())
+			if !ok || user.Role != store.RoleAdmin {
+				respond.Error(w, http.StatusForbidden, "admin access required")
+				return
+			}
+			next.ServeHTTP(w, r)
+		}))
+	}
+}

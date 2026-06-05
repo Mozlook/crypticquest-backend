@@ -165,3 +165,61 @@ func TestRequireLoginSlidingExpiration(t *testing.T) {
 		}
 	})
 }
+
+func TestRequireAdmin(t *testing.T) {
+	st := newTestStore(t)
+	requireAdmin := RequireAdmin(st, auth.NewSessionCookie("", false, "Lax"))
+
+	// A regular player and a bootstrapped admin, each with a live session.
+	playerID, err := st.CreateUser("player", "hash")
+	if err != nil {
+		t.Fatalf("create player: %v", err)
+	}
+	if _, err := st.EnsureAdmin("boss", "hash"); err != nil {
+		t.Fatalf("ensure admin: %v", err)
+	}
+	adminUser, err := st.UserByUsername("boss")
+	if err != nil {
+		t.Fatalf("lookup admin: %v", err)
+	}
+	future := time.Now().Add(time.Hour)
+	if err := st.CreateSession("player-tok", playerID, future); err != nil {
+		t.Fatalf("player session: %v", err)
+	}
+	if err := st.CreateSession("admin-tok", adminUser.ID, future); err != nil {
+		t.Fatalf("admin session: %v", err)
+	}
+
+	var ran bool
+	guarded := requireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ran = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	hit := func(token string) *httptest.ResponseRecorder {
+		ran = false
+		r := httptest.NewRequest(http.MethodGet, "/api/admin/x", nil)
+		if token != "" {
+			r.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: token})
+		}
+		rec := httptest.NewRecorder()
+		guarded.ServeHTTP(rec, r)
+		return rec
+	}
+
+	t.Run("no session -> 401", func(t *testing.T) {
+		if rec := hit(""); rec.Code != http.StatusUnauthorized || ran {
+			t.Fatalf("want 401 no-run, got %d ran=%v", rec.Code, ran)
+		}
+	})
+	t.Run("player -> 403", func(t *testing.T) {
+		if rec := hit("player-tok"); rec.Code != http.StatusForbidden || ran {
+			t.Fatalf("want 403 no-run, got %d ran=%v", rec.Code, ran)
+		}
+	})
+	t.Run("admin -> 200", func(t *testing.T) {
+		if rec := hit("admin-tok"); rec.Code != http.StatusOK || !ran {
+			t.Fatalf("want 200 run, got %d ran=%v", rec.Code, ran)
+		}
+	})
+}
