@@ -99,3 +99,141 @@ func (s *Store) UserByUsername(username string) (User, error) {
 	}
 	return u, nil
 }
+
+// --- Admin surface ----------------------------------------------------------
+
+// AdminUser is the player-management view of an account. It omits the password
+// hash and adds the derived CurrentLevel (solved count + 1, the same ordinal the
+// player sees), so the admin list needs no extra per-row query.
+type AdminUser struct {
+	ID           int64     `json:"id"`
+	Username     string    `json:"username"`
+	Role         string    `json:"role"`
+	CreatedAt    time.Time `json:"created_at"`
+	CurrentLevel int       `json:"current_level"`
+}
+
+// ListUsers returns every account with its current level, ordered by id. The
+// LEFT JOIN + COUNT computes current level in the same query (no N+1).
+func (s *Store) ListUsers() ([]AdminUser, error) {
+	rows, err := s.db.Query(
+		`SELECT u.id, u.username, u.role, u.created_at, COUNT(up.id) + 1
+		 FROM users u
+		 LEFT JOIN user_progress up ON up.user_id = u.id
+		 GROUP BY u.id
+		 ORDER BY u.id`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	defer rows.Close()
+
+	users := []AdminUser{} // non-nil so JSON encodes [] not null
+	for rows.Next() {
+		var u AdminUser
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt, &u.CurrentLevel); err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
+		}
+		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate users: %w", err)
+	}
+	return users, nil
+}
+
+// AdminUserByID returns one account with its current level, or ErrNotFound.
+func (s *Store) AdminUserByID(id int64) (AdminUser, error) {
+	var u AdminUser
+	err := s.db.QueryRow(
+		`SELECT u.id, u.username, u.role, u.created_at,
+		        (SELECT COUNT(*) FROM user_progress WHERE user_id = u.id) + 1
+		 FROM users u WHERE u.id = ?`,
+		id,
+	).Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt, &u.CurrentLevel)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AdminUser{}, ErrNotFound
+	}
+	if err != nil {
+		return AdminUser{}, fmt.Errorf("admin user by id: %w", err)
+	}
+	return u, nil
+}
+
+// SetUserRole changes an account's role. The caller validates the role value.
+// Returns ErrNotFound if no such user.
+func (s *Store) SetUserRole(id int64, role string) error {
+	res, err := s.db.Exec(`UPDATE users SET role = ? WHERE id = ?`, role, id)
+	if err != nil {
+		return fmt.Errorf("set user role: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetUserProgressToLevel rewrites a user's progress so their current level
+// becomes the given level (the simple panel mode). Current level = solved + 1,
+// so reaching level N means the first N-1 levels (by order_index) are solved.
+// Done in one transaction: clear all progress, then mark the first N-1. Returns
+// ErrNotFound if no such user. The caller validates level >= 1.
+func (s *Store) SetUserProgressToLevel(id int64, level int) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("set progress: %w", err)
+	}
+	defer tx.Rollback() // no-op after a successful Commit
+
+	var one int
+	err = tx.QueryRow(`SELECT 1 FROM users WHERE id = ?`, id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("set progress: lookup user: %w", err)
+	}
+
+	if _, err := tx.Exec(`DELETE FROM user_progress WHERE user_id = ?`, id); err != nil {
+		return fmt.Errorf("set progress: clear: %w", err)
+	}
+	// solved = level - 1; the first that many levels by order_index. LIMIT 0 (or
+	// negative clamped to 0) inserts nothing, leaving the user on level 1.
+	solved := level - 1
+	if solved > 0 {
+		if _, err := tx.Exec(
+			`INSERT INTO user_progress (user_id, level_id)
+			 SELECT ?, id FROM levels ORDER BY order_index LIMIT ?`,
+			id, solved,
+		); err != nil {
+			return fmt.Errorf("set progress: insert: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// UpdatePasswordHash overwrites an account's password hash (admin reset flow).
+// Returns ErrNotFound if no such user.
+func (s *Store) UpdatePasswordHash(id int64, passwordHash string) error {
+	res, err := s.db.Exec(`UPDATE users SET password_hash = ? WHERE id = ?`, passwordHash, id)
+	if err != nil {
+		return fmt.Errorf("update password hash: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteUser removes an account by id; sessions and progress cascade away.
+// Returns ErrNotFound if there was nothing to delete.
+func (s *Store) DeleteUser(id int64) error {
+	res, err := s.db.Exec(`DELETE FROM users WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

@@ -46,6 +46,10 @@ func (h *Handlers) Routes() http.Handler {
 	mux.Handle("POST /api/admin/tools", requireAdmin(http.HandlerFunc(h.AdminCreateTool)))
 	mux.Handle("PUT /api/admin/tools/{id}", requireAdmin(http.HandlerFunc(h.AdminUpdateTool)))
 	mux.Handle("DELETE /api/admin/tools/{id}", requireAdmin(http.HandlerFunc(h.AdminDeleteTool)))
+	mux.Handle("GET /api/admin/users", requireAdmin(http.HandlerFunc(h.AdminListUsers)))
+	mux.Handle("PUT /api/admin/users/{id}", requireAdmin(http.HandlerFunc(h.AdminUpdateUser)))
+	mux.Handle("POST /api/admin/users/{id}/reset-password", requireAdmin(http.HandlerFunc(h.AdminResetPassword)))
+	mux.Handle("DELETE /api/admin/users/{id}", requireAdmin(http.HandlerFunc(h.AdminDeleteUser)))
 
 	return mux
 }

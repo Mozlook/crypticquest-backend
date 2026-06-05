@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"crypticquest"
 	"crypticquest/internal/db"
@@ -67,3 +68,90 @@ func TestUserByUsername(t *testing.T) {
 		t.Fatalf("missing user: want ErrNotFound, got %v", err)
 	}
 }
+
+func TestAdminUserManagement(t *testing.T) {
+	s := newTestStore(t)
+
+	// Four levels to move progress through.
+	for _, oi := range []int{10, 20, 30, 40} {
+		if _, err := s.db.Exec(`INSERT INTO levels (order_index, title, description, flag) VALUES (?, 'L', 'd', 'f')`, oi); err != nil {
+			t.Fatalf("insert level: %v", err)
+		}
+	}
+	uid, err := s.CreateUser("alice", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	// Fresh account lists at current level 1.
+	users, err := s.ListUsers()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(users) != 1 || users[0].CurrentLevel != 1 || users[0].Role != RolePlayer {
+		t.Fatalf("fresh list: %+v", users)
+	}
+
+	// Set progress to level 3 -> solved first 2 -> current level 3.
+	if err := s.SetUserProgressToLevel(uid, 3); err != nil {
+		t.Fatalf("set progress: %v", err)
+	}
+	if cl, _ := s.CurrentLevel(uid); cl != 3 {
+		t.Fatalf("want current level 3, got %d", cl)
+	}
+
+	// Lowering to level 1 clears all progress (idempotent rewrite).
+	if err := s.SetUserProgressToLevel(uid, 1); err != nil {
+		t.Fatalf("reset progress: %v", err)
+	}
+	if cl, _ := s.CurrentLevel(uid); cl != 1 {
+		t.Fatalf("want current level 1, got %d", cl)
+	}
+
+	// Promote to admin.
+	if err := s.SetUserRole(uid, RoleAdmin); err != nil {
+		t.Fatalf("set role: %v", err)
+	}
+	if u, _ := s.UserByUsername("alice"); u.Role != RoleAdmin {
+		t.Fatalf("role not updated: %+v", u)
+	}
+
+	// Password hash update.
+	if err := s.UpdatePasswordHash(uid, "newhash"); err != nil {
+		t.Fatalf("update hash: %v", err)
+	}
+	if u, _ := s.UserByUsername("alice"); u.PasswordHash != "newhash" {
+		t.Fatalf("hash not updated")
+	}
+
+	// Missing-user variants -> ErrNotFound.
+	if err := s.SetUserRole(9999, RoleAdmin); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("role missing: want ErrNotFound, got %v", err)
+	}
+	if err := s.SetUserProgressToLevel(9999, 2); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("progress missing: want ErrNotFound, got %v", err)
+	}
+	if err := s.UpdatePasswordHash(9999, "x"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("hash missing: want ErrNotFound, got %v", err)
+	}
+
+	// Delete cascades sessions + progress; second delete is 404.
+	if err := s.CreateSession("tok", uid, timeNowPlusHour()); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := s.DeleteUser(uid); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	var sessCount int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE user_id = ?`, uid).Scan(&sessCount); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	if sessCount != 0 {
+		t.Fatalf("sessions should cascade, got %d", sessCount)
+	}
+	if err := s.DeleteUser(uid); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete again: want ErrNotFound, got %v", err)
+	}
+}
+
+func timeNowPlusHour() time.Time { return time.Now().Add(time.Hour) }

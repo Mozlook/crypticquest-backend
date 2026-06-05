@@ -399,3 +399,107 @@ func TestAdminToolsCRUD(t *testing.T) {
 		t.Fatalf("delete again: want 404, got %d", w.Code)
 	}
 }
+
+func TestAdminUsers(t *testing.T) {
+	e := newTestEnv(t)
+	admin := e.authAdmin(t, "boss")
+	bossID := mustUserID(t, e, "boss")
+
+	// Four levels so progress can move.
+	for _, oi := range []int{10, 20, 30, 40} {
+		e.insertLevel(t, oi, "L", "f")
+	}
+	// A player to manage.
+	player := e.authUser(t, "alice")
+	aliceID := mustUserID(t, e, "alice")
+	said := strconv.FormatInt(aliceID, 10)
+
+	// Gating.
+	if w := e.do(t, http.MethodGet, "/api/admin/users", "", player); w.Code != http.StatusForbidden {
+		t.Fatalf("player list users: want 403, got %d", w.Code)
+	}
+
+	// List shows both, with current level.
+	w := e.do(t, http.MethodGet, "/api/admin/users", "", admin)
+	var users []store.AdminUser
+	mustJSON(t, w, &users)
+	if len(users) != 2 {
+		t.Fatalf("want 2 users, got %+v", users)
+	}
+
+	// Set alice to level 3.
+	w = e.do(t, http.MethodPut, "/api/admin/users/"+said, `{"level":3}`, admin)
+	if w.Code != http.StatusOK {
+		t.Fatalf("set level: %d %s", w.Code, w.Body.String())
+	}
+	var au store.AdminUser
+	mustJSON(t, w, &au)
+	if au.CurrentLevel != 3 {
+		t.Fatalf("want current level 3, got %+v", au)
+	}
+
+	// Promote alice to admin.
+	w = e.do(t, http.MethodPut, "/api/admin/users/"+said, `{"role":"admin"}`, admin)
+	mustJSON(t, w, &au)
+	if au.Role != "admin" {
+		t.Fatalf("want role admin, got %+v", au)
+	}
+
+	// Bad role / bad level -> 400.
+	if w := e.do(t, http.MethodPut, "/api/admin/users/"+said, `{"role":"superuser"}`, admin); w.Code != http.StatusBadRequest {
+		t.Fatalf("bad role: want 400, got %d", w.Code)
+	}
+	if w := e.do(t, http.MethodPut, "/api/admin/users/"+said, `{"level":0}`, admin); w.Code != http.StatusBadRequest {
+		t.Fatalf("bad level: want 400, got %d", w.Code)
+	}
+
+	// Self-demote guard.
+	if w := e.do(t, http.MethodPut, "/api/admin/users/"+strconv.FormatInt(bossID, 10), `{"role":"player"}`, admin); w.Code != http.StatusConflict {
+		t.Fatalf("self-demote: want 409, got %d", w.Code)
+	}
+
+	// Reset password -> 200 with a non-empty plaintext.
+	w = e.do(t, http.MethodPost, "/api/admin/users/"+said+"/reset-password", "", admin)
+	if w.Code != http.StatusOK {
+		t.Fatalf("reset: %d %s", w.Code, w.Body.String())
+	}
+	var pw struct {
+		Password string `json:"password"`
+	}
+	mustJSON(t, w, &pw)
+	if len(pw.Password) < 12 {
+		t.Fatalf("temp password too short: %q", pw.Password)
+	}
+	// The reset must invalidate alice's existing session.
+	if w := e.do(t, http.MethodGet, "/api/me", "", player); w.Code != http.StatusUnauthorized {
+		t.Fatalf("session should be killed by reset: want 401, got %d", w.Code)
+	}
+
+	// Missing-user variants -> 404.
+	if w := e.do(t, http.MethodPut, "/api/admin/users/9999", `{"level":2}`, admin); w.Code != http.StatusNotFound {
+		t.Fatalf("update missing: want 404, got %d", w.Code)
+	}
+	if w := e.do(t, http.MethodPost, "/api/admin/users/9999/reset-password", "", admin); w.Code != http.StatusNotFound {
+		t.Fatalf("reset missing: want 404, got %d", w.Code)
+	}
+
+	// Self-delete guard, then delete alice -> 204, then 404.
+	if w := e.do(t, http.MethodDelete, "/api/admin/users/"+strconv.FormatInt(bossID, 10), "", admin); w.Code != http.StatusConflict {
+		t.Fatalf("self-delete: want 409, got %d", w.Code)
+	}
+	if w := e.do(t, http.MethodDelete, "/api/admin/users/"+said, "", admin); w.Code != http.StatusNoContent {
+		t.Fatalf("delete alice: want 204, got %d", w.Code)
+	}
+	if w := e.do(t, http.MethodDelete, "/api/admin/users/"+said, "", admin); w.Code != http.StatusNotFound {
+		t.Fatalf("delete again: want 404, got %d", w.Code)
+	}
+}
+
+func mustUserID(t *testing.T, e *testEnv, username string) int64 {
+	t.Helper()
+	u, err := e.st.UserByUsername(username)
+	if err != nil {
+		t.Fatalf("lookup %s: %v", username, err)
+	}
+	return u.ID
+}

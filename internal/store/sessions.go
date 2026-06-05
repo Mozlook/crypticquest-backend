@@ -37,6 +37,16 @@ func (s *Store) DeleteSession(token string) error {
 	return nil
 }
 
+// DeleteUserSessions removes every session belonging to a user, logging them out
+// everywhere. Used after a password reset so existing (possibly compromised)
+// sessions cannot outlive the credential change. Deleting zero rows is fine.
+func (s *Store) DeleteUserSessions(userID int64) error {
+	if _, err := s.db.Exec(`DELETE FROM sessions WHERE user_id = ?`, userID); err != nil {
+		return fmt.Errorf("delete user sessions: %w", err)
+	}
+	return nil
+}
+
 // RefreshSession moves a session's expiry to newExpiresAt (sliding expiration).
 // Stored in the same RFC3339 UTC format as CreateSession for consistency.
 func (s *Store) RefreshSession(token string, newExpiresAt time.Time) error {
