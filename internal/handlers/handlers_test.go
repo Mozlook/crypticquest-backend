@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -52,6 +53,23 @@ func (e *testEnv) authUser(t *testing.T, username string) *http.Cookie {
 	}
 	token := "token-" + username
 	if err := e.st.CreateSession(token, uid, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	return &http.Cookie{Name: auth.SessionCookieName, Value: token}
+}
+
+// authAdmin bootstraps an admin and a live session, returning its cookie.
+func (e *testEnv) authAdmin(t *testing.T, username string) *http.Cookie {
+	t.Helper()
+	if _, err := e.st.EnsureAdmin(username, "hash"); err != nil {
+		t.Fatalf("ensure admin: %v", err)
+	}
+	u, err := e.st.UserByUsername(username)
+	if err != nil {
+		t.Fatalf("lookup admin: %v", err)
+	}
+	token := "token-" + username
+	if err := e.st.CreateSession(token, u.ID, time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	return &http.Cookie{Name: auth.SessionCookieName, Value: token}
@@ -163,4 +181,97 @@ func boolStr(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// mustJSON decodes the recorder body into v, failing the test on error.
+func mustJSON(t *testing.T, w *httptest.ResponseRecorder, v any) {
+	t.Helper()
+	if err := json.Unmarshal(w.Body.Bytes(), v); err != nil {
+		t.Fatalf("decode response %q: %v", w.Body.String(), err)
+	}
+}
+
+func TestAdminLevelsGating(t *testing.T) {
+	e := newTestEnv(t)
+	player := e.authUser(t, "alice")
+
+	// No session -> 401; player session -> 403; on every admin verb.
+	for _, ep := range []struct{ method, target string }{
+		{http.MethodGet, "/api/admin/levels"},
+		{http.MethodPost, "/api/admin/levels"},
+		{http.MethodPut, "/api/admin/levels/1"},
+		{http.MethodDelete, "/api/admin/levels/1"},
+	} {
+		if w := e.do(t, ep.method, ep.target, "", nil); w.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s no-auth: want 401, got %d", ep.method, ep.target, w.Code)
+		}
+		if w := e.do(t, ep.method, ep.target, "", player); w.Code != http.StatusForbidden {
+			t.Fatalf("%s %s player: want 403, got %d", ep.method, ep.target, w.Code)
+		}
+	}
+}
+
+func TestAdminLevelsCRUD(t *testing.T) {
+	e := newTestEnv(t)
+	admin := e.authAdmin(t, "boss")
+
+	// Create: admin response includes the flag.
+	body := `{"order_index":10,"title":"Caesar","description":"narrative","flag":"flag{a}"}`
+	w := e.do(t, http.MethodPost, "/api/admin/levels", body, admin)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: want 201, got %d body %s", w.Code, w.Body.String())
+	}
+	var created store.AdminLevel
+	mustJSON(t, w, &created)
+	if created.ID == 0 || created.Flag != "flag{a}" {
+		t.Fatalf("created admin level missing id/flag: %+v", created)
+	}
+	sid := strconv.FormatInt(created.ID, 10)
+
+	// Duplicate order_index -> 409.
+	if w := e.do(t, http.MethodPost, "/api/admin/levels", body, admin); w.Code != http.StatusConflict {
+		t.Fatalf("dup order_index: want 409, got %d", w.Code)
+	}
+
+	// Bad unlocks_tool_id -> 400.
+	badRef := `{"order_index":20,"title":"x","description":"d","flag":"f","unlocks_tool_id":9999}`
+	if w := e.do(t, http.MethodPost, "/api/admin/levels", badRef, admin); w.Code != http.StatusBadRequest {
+		t.Fatalf("bad tool ref: want 400, got %d", w.Code)
+	}
+
+	// Missing required field -> 400.
+	if w := e.do(t, http.MethodPost, "/api/admin/levels", `{"order_index":30,"title":"","description":"d","flag":"f"}`, admin); w.Code != http.StatusBadRequest {
+		t.Fatalf("empty title: want 400, got %d", w.Code)
+	}
+
+	// List includes the flag.
+	w = e.do(t, http.MethodGet, "/api/admin/levels", "", admin)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "flag{a}") {
+		t.Fatalf("list should include flag: %d %s", w.Code, w.Body.String())
+	}
+
+	// Update.
+	upd := `{"order_index":10,"title":"Caesar v2","description":"d2","flag":"flag{b}"}`
+	w = e.do(t, http.MethodPut, "/api/admin/levels/"+sid, upd, admin)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update: want 200, got %d %s", w.Code, w.Body.String())
+	}
+	var updated store.AdminLevel
+	mustJSON(t, w, &updated)
+	if updated.Title != "Caesar v2" || updated.Flag != "flag{b}" {
+		t.Fatalf("update not applied: %+v", updated)
+	}
+
+	// Update missing -> 404.
+	if w := e.do(t, http.MethodPut, "/api/admin/levels/9999", upd, admin); w.Code != http.StatusNotFound {
+		t.Fatalf("update missing: want 404, got %d", w.Code)
+	}
+
+	// Delete -> 204, then 404.
+	if w := e.do(t, http.MethodDelete, "/api/admin/levels/"+sid, "", admin); w.Code != http.StatusNoContent {
+		t.Fatalf("delete: want 204, got %d", w.Code)
+	}
+	if w := e.do(t, http.MethodDelete, "/api/admin/levels/"+sid, "", admin); w.Code != http.StatusNotFound {
+		t.Fatalf("delete again: want 404, got %d", w.Code)
+	}
 }

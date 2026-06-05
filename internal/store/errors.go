@@ -14,6 +14,15 @@ var (
 	ErrUsernameTaken = errors.New("username already taken")
 	// ErrNotFound is returned when a looked-up row does not exist.
 	ErrNotFound = errors.New("not found")
+	// ErrOrderIndexTaken is returned when a level's order_index collides with an
+	// existing one (the UNIQUE constraint).
+	ErrOrderIndexTaken = errors.New("order_index already taken")
+	// ErrInvalidReference is returned when a write points a foreign key at a row
+	// that does not exist (e.g. a level's unlocks_tool_id naming a missing tool).
+	ErrInvalidReference = errors.New("invalid reference")
+	// ErrReferenced is returned when a row cannot be deleted because another row
+	// still references it (e.g. a tool a level unlocks).
+	ErrReferenced = errors.New("row is still referenced")
 )
 
 // isUniqueViolation reports whether err is a SQLite UNIQUE-constraint failure.
@@ -21,4 +30,12 @@ var (
 func isUniqueViolation(err error) bool {
 	var sqErr *sqlite.Error
 	return errors.As(err, &sqErr) && sqErr.Code() == sqlitelib.SQLITE_CONSTRAINT_UNIQUE
+}
+
+// isForeignKeyViolation reports whether err is a SQLite FOREIGN KEY failure —
+// raised both when a write references a missing row and when a delete is blocked
+// by a still-existing referrer (foreign_keys is ON per connection).
+func isForeignKeyViolation(err error) bool {
+	var sqErr *sqlite.Error
+	return errors.As(err, &sqErr) && sqErr.Code() == sqlitelib.SQLITE_CONSTRAINT_FOREIGNKEY
 }

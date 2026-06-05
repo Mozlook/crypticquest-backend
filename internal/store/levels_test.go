@@ -112,3 +112,82 @@ func TestLevelForSubmit(t *testing.T) {
 		t.Fatalf("missing level: want ErrNotFound, got %v", err)
 	}
 }
+
+func TestAdminLevelCRUD(t *testing.T) {
+	s := newTestStore(t)
+
+	// A tool to reference, and a level unlocking it.
+	res, err := s.db.Exec(`INSERT INTO tools (type, title, content) VALUES ('link', 'CC', 'http://x')`)
+	if err != nil {
+		t.Fatalf("insert tool: %v", err)
+	}
+	toolID, _ := res.LastInsertId()
+
+	id, err := s.CreateLevel(AdminLevelInput{
+		OrderIndex: 10, Title: "L10", Description: "d", Flag: "flag{a}", UnlocksToolID: &toolID,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Read back, flag and tool ref included.
+	got, err := s.AdminLevelByID(id)
+	if err != nil {
+		t.Fatalf("by id: %v", err)
+	}
+	if got.Flag != "flag{a}" || got.OrderIndex != 10 || got.UnlocksToolID == nil || *got.UnlocksToolID != toolID {
+		t.Fatalf("unexpected level: %+v", got)
+	}
+
+	// Duplicate order_index -> ErrOrderIndexTaken.
+	if _, err := s.CreateLevel(AdminLevelInput{OrderIndex: 10, Title: "dup", Description: "d", Flag: "f"}); !errors.Is(err, ErrOrderIndexTaken) {
+		t.Fatalf("dup order_index: want ErrOrderIndexTaken, got %v", err)
+	}
+
+	// Bad tool reference -> ErrInvalidReference.
+	bad := int64(9999)
+	if _, err := s.CreateLevel(AdminLevelInput{OrderIndex: 20, Title: "x", Description: "d", Flag: "f", UnlocksToolID: &bad}); !errors.Is(err, ErrInvalidReference) {
+		t.Fatalf("bad tool ref: want ErrInvalidReference, got %v", err)
+	}
+
+	// Update: change title/flag and drop the tool link.
+	if err := s.UpdateLevel(id, AdminLevelInput{OrderIndex: 10, Title: "L10b", Description: "d2", Flag: "flag{b}"}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, _ = s.AdminLevelByID(id)
+	if got.Title != "L10b" || got.Flag != "flag{b}" || got.UnlocksToolID != nil {
+		t.Fatalf("after update: %+v", got)
+	}
+
+	// Update a missing level -> ErrNotFound.
+	if err := s.UpdateLevel(9999, AdminLevelInput{OrderIndex: 99, Title: "x", Description: "d", Flag: "f"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("update missing: want ErrNotFound, got %v", err)
+	}
+
+	// ListAllLevels includes the flag.
+	all, err := s.ListAllLevels()
+	if err != nil {
+		t.Fatalf("list all: %v", err)
+	}
+	if len(all) != 1 || all[0].Flag != "flag{b}" {
+		t.Fatalf("list all: %+v", all)
+	}
+
+	// Delete cascades to hints; then 404 on second delete.
+	if _, err := s.db.Exec(`INSERT INTO hints (level_id, order_index, text) VALUES (?, 1, 'h')`, id); err != nil {
+		t.Fatalf("insert hint: %v", err)
+	}
+	if err := s.DeleteLevel(id); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	var hintCount int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM hints WHERE level_id = ?`, id).Scan(&hintCount); err != nil {
+		t.Fatalf("count hints: %v", err)
+	}
+	if hintCount != 0 {
+		t.Fatalf("hints should cascade-delete, got %d", hintCount)
+	}
+	if err := s.DeleteLevel(id); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete missing: want ErrNotFound, got %v", err)
+	}
+}

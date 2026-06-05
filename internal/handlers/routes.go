@@ -14,6 +14,7 @@ func (h *Handlers) Routes() http.Handler {
 	mux := http.NewServeMux()
 
 	requireLogin := middleware.RequireLogin(h.store, h.cookie)
+	requireAdmin := middleware.RequireAdmin(h.store, h.cookie)
 
 	mux.HandleFunc("GET /health", health)
 
@@ -33,6 +34,12 @@ func (h *Handlers) Routes() http.Handler {
 	// Gated downloads (outside /api/, but still authenticated for the gate)
 	mux.Handle("GET /files/levels/{id}/{path...}", requireLogin(http.HandlerFunc(h.ServeLevelFile)))
 	mux.Handle("GET /files/tools/{path...}", requireLogin(http.HandlerFunc(h.ServeToolFile)))
+
+	// Admin (logged in AND role == admin)
+	mux.Handle("GET /api/admin/levels", requireAdmin(http.HandlerFunc(h.AdminListLevels)))
+	mux.Handle("POST /api/admin/levels", requireAdmin(http.HandlerFunc(h.AdminCreateLevel)))
+	mux.Handle("PUT /api/admin/levels/{id}", requireAdmin(http.HandlerFunc(h.AdminUpdateLevel)))
+	mux.Handle("DELETE /api/admin/levels/{id}", requireAdmin(http.HandlerFunc(h.AdminDeleteLevel)))
 
 	return mux
 }
