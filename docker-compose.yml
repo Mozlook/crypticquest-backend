@@ -19,6 +19,12 @@ services:
       # Named volume mounted as a DIRECTORY (not a single file): SQLite WAL mode
       # writes ctf.db plus ctf.db-wal / ctf.db-shm next to it.
       - cq-data:/data
+      # Gated puzzle/tool files, bind-mounted read-only from the host. They live
+      # ONLY on the server (never in git or the image), so no one can pull
+      # answers/tools from the repo instead of solving. Point CQ_FILES_DIR at a
+      # directory outside the repo checkout. Layout inside: levels/{id}/<file>
+      # and tools/<file>. read-only: the app serves files, never writes them.
+      - ${CQ_FILES_DIR:-./files}:/app/files:ro
 
 volumes:
   cq-data:

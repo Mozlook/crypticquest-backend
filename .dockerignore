@@ -5,6 +5,10 @@ README.md
 Dockerfile
 .dockerignore
 
+# Gated content files are never part of the image — they're bind-mounted at
+# runtime and must not leak into the built image.
+files/
+
 # Local databases (the prod DB lives in the /data volume).
 *.db
 *.db-wal

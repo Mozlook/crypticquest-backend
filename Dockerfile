@@ -27,9 +27,6 @@ RUN apk add --no-cache ca-certificates sqlite tzdata \
 
 WORKDIR /app
 COPY --from=build /out/server /app/server
-# Static puzzle/tool files served (gated) by the app. Baked into the image since
-# there is no upload endpoint yet; revisit when admin file upload lands.
-COPY files /app/files
 
 # Migrations are embedded in the binary, so main() runs them on startup — the
 # container needs no separate migrate step.
@@ -37,9 +34,11 @@ ENV PORT=8080 \
     DB_PATH=/data/ctf.db \
     FILES_DIR=/app/files
 
-# /data is the DB volume mountpoint, owned by the non-root user so a fresh named
-# volume inherits writable ownership.
-RUN mkdir -p /data && chown app:app /data
+# /data is the DB volume mountpoint. /app/files is the mountpoint for the gated
+# content bind mount — puzzle/tool files live only on the server, never baked
+# into the image (so no one can pull answers/tools from the repo or image). Both
+# owned by the non-root user so a fresh mount inherits writable ownership.
+RUN mkdir -p /data /app/files && chown app:app /data /app/files
 VOLUME ["/data"]
 USER app
 EXPOSE 8080

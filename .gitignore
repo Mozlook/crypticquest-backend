@@ -13,6 +13,14 @@
 .env.local
 *.local.env
 
+# Gated puzzle/tool content. These files live only on the server (bind-mounted),
+# never in git — so no one can pull answers/tools from the repo instead of
+# solving. Only the .gitkeep markers (which preserve the directory layout) are
+# tracked.
+/files/**
+!/files/**/
+!/files/**/.gitkeep
+
 # OS / editor cruft
 .DS_Store
 *.swp

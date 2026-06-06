@@ -1,3 +1,0 @@
-Decoded transmission:
-
-The flag for this level is: test3

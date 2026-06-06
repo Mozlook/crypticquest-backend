@@ -37,6 +37,41 @@ the cross-site session cookie (Netlify frontend ↔ VPS backend) works over HTTP
 All settings come from the environment — see [`.env.example`](./.env.example)
 for the full list and prod-oriented values.
 
+## Content files (puzzle attachments & tool PDFs)
+
+The admin panel creates levels and tools (database rows) but **does not upload
+files** — there is no upload endpoint. The gated `/files/*` routes serve from
+`FILES_DIR`, which in production is a **read-only bind mount** from a host
+directory (`CQ_FILES_DIR`, see `.env.example`). Those files live **only on the
+server** — never in git or the image — so no one can pull answers/tools from the
+repo instead of solving.
+
+Layout under `CQ_FILES_DIR`:
+
+```
+levels/{id}/<file>   # puzzle attachments; {id} is the level's DB id
+tools/<file>         # tool files; <file> must match the tool's `content` field
+```
+
+To add a file:
+
+1. Create the level (or tool) in the admin panel first — a level's `{id}` is
+   assigned by the database; a tool's `content` is the filename you type.
+2. Copy the file onto the host into the right subdirectory, e.g.:
+
+   ```sh
+   ssh user@vps 'mkdir -p /srv/crypticquest/files/levels/7'
+   scp message.txt    user@vps:/srv/crypticquest/files/levels/7/
+   scp ascii-table.pdf user@vps:/srv/crypticquest/files/tools/
+   ```
+
+3. It's served immediately — no restart or rebuild. The app reads from disk per
+   request and discovers a level's files on the fly.
+
+Files must be **readable by the container user** (uid 10001); a world-readable
+`chmod a+rX` on the tree is the simplest guarantee. The bind mount is read-only,
+so the app can serve but never modify them.
+
 ## Backup & restore
 
 SQLite is a single file, but **do not copy `ctf.db` while the app is running** —
