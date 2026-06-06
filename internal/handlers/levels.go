@@ -3,12 +3,23 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strconv"
 
+	"crypticquest/internal/files"
 	"crypticquest/internal/middleware"
 	"crypticquest/internal/respond"
 	"crypticquest/internal/store"
 )
+
+// levelDetailResponse is the single-level player view: the store's LevelDetail
+// (no flag) plus the names of any files served for this level, so the frontend
+// can render download links without guessing filenames. Files are discovered
+// from files/levels/{id}/ — dropping a file there makes it appear.
+type levelDetailResponse struct {
+	store.LevelDetail
+	Files []string `json:"files"`
+}
 
 // ListLevels handles GET /api/levels: the player's accessible levels (solved
 // plus the next unsolved one), without flags. Future levels are not returned.
@@ -62,5 +73,11 @@ func (h *Handlers) GetLevel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respond.JSON(w, http.StatusOK, level)
+	levelFiles, err := files.List(filepath.Join(h.filesDir, "levels", strconv.FormatInt(id, 10)))
+	if err != nil {
+		respond.Error(w, http.StatusInternalServerError, "could not load level")
+		return
+	}
+
+	respond.JSON(w, http.StatusOK, levelDetailResponse{LevelDetail: level, Files: levelFiles})
 }

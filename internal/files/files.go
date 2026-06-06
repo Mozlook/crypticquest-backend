@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 )
 
 // ErrNotFound is returned when the requested file does not exist, is a
@@ -58,4 +61,42 @@ func Open(base, path string) (*os.File, error) {
 	}
 
 	return f, nil
+}
+
+// List returns the regular files under base as relative, forward-slash paths,
+// sorted. Directories and dotfiles (e.g. .gitkeep) are skipped. A missing base
+// directory yields an empty (non-nil) slice — a level may simply have no files —
+// rather than an error. base is caller-trusted (built from a level id), so this
+// is a plain walk, not the traversal-guarded Open path.
+func List(base string) ([]string, error) {
+	names := []string{} // non-nil so JSON encodes [] not null
+	err := filepath.WalkDir(base, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				return fs.SkipAll // base absent: nothing to list
+			}
+			return walkErr
+		}
+		if d.IsDir() {
+			// Skip hidden subdirectories, but never the base dir itself.
+			if path != base && strings.HasPrefix(d.Name(), ".") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return nil // skip dotfiles like .gitkeep
+		}
+		rel, err := filepath.Rel(base, path)
+		if err != nil {
+			return err
+		}
+		names = append(names, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list %q: %w", base, err)
+	}
+	sort.Strings(names)
+	return names, nil
 }

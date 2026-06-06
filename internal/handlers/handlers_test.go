@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -23,9 +24,10 @@ import (
 // directly — there is no player-flow store method to create levels (that is the
 // admin panel's job, Phase 6).
 type testEnv struct {
-	router http.Handler
-	db     *sql.DB
-	st     *store.Store
+	router   http.Handler
+	db       *sql.DB
+	st       *store.Store
+	filesDir string // base for gated downloads, so tests can drop level files
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -39,8 +41,9 @@ func newTestEnv(t *testing.T) *testEnv {
 		t.Fatalf("migrate: %v", err)
 	}
 	st := store.New(database)
-	h := New(st, auth.NewSessionCookie("", false, "Lax"), t.TempDir(), "https://app.example.com")
-	return &testEnv{router: h.Routes(), db: database, st: st}
+	filesDir := t.TempDir()
+	h := New(st, auth.NewSessionCookie("", false, "Lax"), filesDir, "https://app.example.com")
+	return &testEnv{router: h.Routes(), db: database, st: st, filesDir: filesDir}
 }
 
 // authUser creates a user plus a live session and returns the cookie carrying
@@ -173,6 +176,55 @@ func TestFlagNeverInPlayerResponses(t *testing.T) {
 		if strings.Contains(w.Body.String(), flag) {
 			t.Fatalf("%s %s leaked the flag: %s", ep.method, ep.target, w.Body.String())
 		}
+	}
+}
+
+// TestLevelDetailListsFiles checks GET /api/levels/{id} reports the files in
+// files/levels/{id}/ (so the frontend can link them) and an empty list when the
+// level has none.
+func TestLevelDetailListsFiles(t *testing.T) {
+	e := newTestEnv(t)
+	cookie := e.authUser(t, "alice")
+
+	withFile := e.insertLevel(t, 10, "Attachment", "f")
+	dir := filepath.Join(e.filesDir, "levels", strconv.FormatInt(withFile, 10))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "message.txt"), []byte("clue"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".gitkeep"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	noFile := e.insertLevel(t, 20, "Plain", "f")
+	// Both levels must be reachable: current level = solved + 1, so put alice on
+	// level 2 (rank 2, order_index 20, becomes accessible).
+	if err := e.st.SetUserProgressToLevel(mustUserID(t, e, "alice"), 2); err != nil {
+		t.Fatalf("set progress: %v", err)
+	}
+
+	var resp struct {
+		Files []string `json:"files"`
+	}
+
+	w := e.do(t, http.MethodGet, "/api/levels/"+strconv.FormatInt(withFile, 10), "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("with file: status %d body %s", w.Code, w.Body.String())
+	}
+	mustJSON(t, w, &resp)
+	if len(resp.Files) != 1 || resp.Files[0] != "message.txt" {
+		t.Fatalf("with file: files = %v (dotfile must be skipped)", resp.Files)
+	}
+
+	w = e.do(t, http.MethodGet, "/api/levels/"+strconv.FormatInt(noFile, 10), "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("no file: status %d", w.Code)
+	}
+	resp.Files = nil
+	mustJSON(t, w, &resp)
+	if resp.Files == nil || len(resp.Files) != 0 {
+		t.Fatalf("no file: want empty array, got %#v", resp.Files)
 	}
 }
 

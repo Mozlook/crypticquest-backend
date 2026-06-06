@@ -61,6 +61,43 @@ func TestOpen(t *testing.T) {
 	}
 }
 
+func TestList(t *testing.T) {
+	t.Run("lists files recursively, sorted, skipping dirs and dotfiles", func(t *testing.T) {
+		base := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(base, "sub"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(base, "b.txt"), "b")
+		writeFile(t, filepath.Join(base, "a.txt"), "a")
+		writeFile(t, filepath.Join(base, "sub", "nested.txt"), "n")
+		writeFile(t, filepath.Join(base, ".gitkeep"), "") // dotfile, must be skipped
+
+		got, err := List(base)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		want := []string{"a.txt", "b.txt", "sub/nested.txt"}
+		if len(got) != len(want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("got %v, want %v", got, want)
+			}
+		}
+	})
+
+	t.Run("missing base yields empty, non-nil slice", func(t *testing.T) {
+		got, err := List(filepath.Join(t.TempDir(), "does-not-exist"))
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if got == nil || len(got) != 0 {
+			t.Fatalf("want empty non-nil slice, got %#v", got)
+		}
+	})
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
