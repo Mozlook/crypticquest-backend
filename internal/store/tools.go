@@ -23,14 +23,15 @@ type Tool struct {
 }
 
 // UnlockedTools returns the tools the user has unlocked: every tool whose
-// unlocks_at_level_id is a level they have solved. Tools with a NULL
-// unlocks_at_level_id are never unlocked (the JOIN drops them). Ordered by tool
-// id for a stable, deterministic toolkit.
+// unlocks_at_level_id is a level they have solved, plus every tool with a NULL
+// unlocks_at_level_id — those are gated by no level, so they are always available.
+// Ordered by tool id for a stable, deterministic toolkit.
 func (s *Store) UnlockedTools(userID int64) ([]Tool, error) {
 	rows, err := s.db.Query(
 		`SELECT t.id, t.type, t.title, COALESCE(t.description, ''), t.content
 		 FROM tools t
-		 JOIN user_progress up ON up.level_id = t.unlocks_at_level_id AND up.user_id = ?
+		 WHERE t.unlocks_at_level_id IS NULL
+		    OR t.unlocks_at_level_id IN (SELECT level_id FROM user_progress WHERE user_id = ?)
 		 ORDER BY t.id`,
 		userID,
 	)
@@ -56,18 +57,19 @@ func (s *Store) UnlockedTools(userID int64) ([]Tool, error) {
 // IsToolFileUnlocked reports whether the user may download the toolkit file at
 // the given path. A file is unlocked when some tool the user has earned exposes
 // it via tool.content — the contract is that a file tool's content holds the
-// path relative to files/tools/ (the same segment the URL carries). The JOIN is
-// the same earned-tools shape as UnlockedTools; link-type tools store a URL in
-// content, so they simply never match a file path.
+// path relative to files/tools/ (the same segment the URL carries). Mirrors
+// UnlockedTools: a tool with a NULL unlocks_at_level_id is always available;
+// link-type tools store a URL in content, so they simply never match a file path.
 func (s *Store) IsToolFileUnlocked(userID int64, path string) (bool, error) {
 	var unlocked bool
 	if err := s.db.QueryRow(
 		`SELECT EXISTS(
 		   SELECT 1 FROM tools t
-		   JOIN user_progress up ON up.level_id = t.unlocks_at_level_id AND up.user_id = ?
 		   WHERE t.content = ?
+		     AND (t.unlocks_at_level_id IS NULL
+		          OR t.unlocks_at_level_id IN (SELECT level_id FROM user_progress WHERE user_id = ?))
 		 )`,
-		userID, path,
+		path, userID,
 	).Scan(&unlocked); err != nil {
 		return false, fmt.Errorf("is tool file unlocked: %w", err)
 	}

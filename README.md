@@ -80,7 +80,7 @@ Six tables (`migrations/000001_init_schema.up.sql`):
 | `sessions` | login sessions | `token` PK; `user_id` → `users` **ON DELETE CASCADE** |
 | `levels` | puzzles | `order_index` **unique** (ordering, with gaps) |
 | `hints` | per-level hints | `level_id` → `levels` **CASCADE**; ordered by `order_index` |
-| `tools` | toolkit entries | `type` (`link`/`pdf`/`builtin`), `content`; `unlocks_at_level_id` → `levels` (**ON DELETE SET NULL**) — one level can unlock many tools |
+| `tools` | toolkit entries | `type` (`link`/`pdf`/`builtin`), `content`; `unlocks_at_level_id` → `levels` (**ON DELETE SET NULL**) — one level can unlock many tools; **NULL = always available** |
 | `user_progress` | which levels a user solved | `user_id` & `level_id` → CASCADE; **`UNIQUE(user_id, level_id)`** makes recording a solve idempotent |
 
 Derived concepts (computed, not stored):

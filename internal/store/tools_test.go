@@ -101,22 +101,24 @@ func TestUnlockedTools(t *testing.T) {
 		t.Fatalf("insert toolB: %v", err)
 	}
 	toolB, _ := res.LastInsertId()
-	if _, err := s.db.Exec(
-		`INSERT INTO tools (type, title, content, unlocks_at_level_id) VALUES ('ref', 'orphan', 'orphan-data', NULL)`,
-	); err != nil {
+	res, err = s.db.Exec(
+		`INSERT INTO tools (type, title, content, unlocks_at_level_id) VALUES ('ref', 'always', 'always-data', NULL)`,
+	)
+	if err != nil {
 		t.Fatalf("insert toolC: %v", err)
 	}
+	toolC, _ := res.LastInsertId() // NULL level -> always available
 
-	// Fresh account: nothing solved, so no tools unlocked. Want [] not nil.
+	// Fresh account: nothing solved, but toolC (NULL level) is always available.
 	got, err := s.UnlockedTools(uid)
 	if err != nil {
 		t.Fatalf("unlocked: %v", err)
 	}
-	if got == nil || len(got) != 0 {
-		t.Fatalf("fresh account: want empty non-nil slice, got %+v", got)
+	if len(got) != 1 || got[0].ID != toolC {
+		t.Fatalf("fresh account: want only toolC (always available), got %+v", got)
 	}
 
-	// Solve L10 -> only toolA unlocked, with description carried through.
+	// Solve L10 -> toolA unlocks (with its description), toolC still always there.
 	if _, err := s.db.Exec(
 		`INSERT INTO user_progress (user_id, level_id) VALUES (?, ?)`,
 		uid, levelID[10],
@@ -127,16 +129,15 @@ func TestUnlockedTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unlocked: %v", err)
 	}
-	if len(got) != 1 || got[0].ID != toolA {
-		t.Fatalf("after L10: want only toolA, got %+v", got)
+	if len(got) != 2 || got[0].ID != toolA || got[1].ID != toolC {
+		t.Fatalf("after L10: want toolA,toolC ordered, got %+v", got)
 	}
 	if got[0].Title != "Caesar wheel" || got[0].Type != "cipher" ||
 		got[0].Description != "rotates letters" || got[0].Content != "wheel-data" {
 		t.Fatalf("toolA fields wrong: %+v", got[0])
 	}
 
-	// Solve L20 (unlocks toolB) and L30 (unlocks nothing) -> toolA + toolB only;
-	// toolC stays locked because it is tied to no level.
+	// Solve L20 (unlocks toolB) and L30 (unlocks nothing) -> toolA + toolB + toolC.
 	for _, oi := range []int{20, 30} {
 		if _, err := s.db.Exec(
 			`INSERT INTO user_progress (user_id, level_id) VALUES (?, ?)`,
@@ -149,8 +150,8 @@ func TestUnlockedTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unlocked: %v", err)
 	}
-	if len(got) != 2 || got[0].ID != toolA || got[1].ID != toolB {
-		t.Fatalf("after L20+L30: want toolA,toolB ordered, got %+v", got)
+	if len(got) != 3 || got[0].ID != toolA || got[1].ID != toolB || got[2].ID != toolC {
+		t.Fatalf("after L20+L30: want toolA,toolB,toolC ordered, got %+v", got)
 	}
 	// toolB had a NULL description -> COALESCE should give "".
 	if got[1].Description != "" {
