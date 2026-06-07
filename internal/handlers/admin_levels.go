@@ -11,14 +11,13 @@ import (
 	"crypticquest/internal/store"
 )
 
-// adminLevelRequest is the JSON body for creating/updating a level. unlocks_tool_id
-// is a pointer so an omitted/null value means "unlocks nothing" rather than 0.
+// adminLevelRequest is the JSON body for creating/updating a level. Which tools a
+// level unlocks is set on the tools side now, so a level body carries no tool ref.
 type adminLevelRequest struct {
-	OrderIndex    int    `json:"order_index"`
-	Title         string `json:"title"`
-	Description   string `json:"description"`
-	Flag          string `json:"flag"`
-	UnlocksToolID *int64 `json:"unlocks_tool_id"`
+	OrderIndex  int    `json:"order_index"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Flag        string `json:"flag"`
 }
 
 // toInput validates the request and converts it to a store input. The error
@@ -46,11 +45,10 @@ func (req adminLevelRequest) toInput() (store.AdminLevelInput, string) {
 		return store.AdminLevelInput{}, "flag is too long"
 	}
 	return store.AdminLevelInput{
-		OrderIndex:    req.OrderIndex,
-		Title:         req.Title,
-		Description:   req.Description,
-		Flag:          req.Flag,
-		UnlocksToolID: req.UnlocksToolID,
+		OrderIndex:  req.OrderIndex,
+		Title:       req.Title,
+		Description: req.Description,
+		Flag:        req.Flag,
 	}, ""
 }
 
@@ -148,8 +146,6 @@ func writeLevelWriteErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrOrderIndexTaken):
 		respond.Error(w, http.StatusConflict, "order_index already in use")
-	case errors.Is(err, store.ErrInvalidReference):
-		respond.Error(w, http.StatusBadRequest, "unlocks_tool_id references a non-existent tool")
 	default:
 		respond.Error(w, http.StatusInternalServerError, "could not save level")
 	}

@@ -285,12 +285,6 @@ func TestAdminLevelsCRUD(t *testing.T) {
 		t.Fatalf("dup order_index: want 409, got %d", w.Code)
 	}
 
-	// Bad unlocks_tool_id -> 400.
-	badRef := `{"order_index":20,"title":"x","description":"d","flag":"f","unlocks_tool_id":9999}`
-	if w := e.do(t, http.MethodPost, "/api/admin/levels", badRef, admin); w.Code != http.StatusBadRequest {
-		t.Fatalf("bad tool ref: want 400, got %d", w.Code)
-	}
-
 	// Missing required field -> 400.
 	if w := e.do(t, http.MethodPost, "/api/admin/levels", `{"order_index":30,"title":"","description":"d","flag":"f"}`, admin); w.Code != http.StatusBadRequest {
 		t.Fatalf("empty title: want 400, got %d", w.Code)
@@ -433,17 +427,13 @@ func TestAdminToolsCRUD(t *testing.T) {
 		t.Fatalf("update missing: want 404, got %d", w.Code)
 	}
 
-	// A level unlocking the tool blocks deletion -> 409.
-	if _, err := e.db.Exec(`INSERT INTO levels (order_index, title, description, flag, unlocks_tool_id) VALUES (10, 'L', 'd', 'f', ?)`, tool.ID); err != nil {
-		t.Fatalf("insert referencing level: %v", err)
+	// A bad unlocks_at_level_id (no such level) -> 400.
+	if w := e.do(t, http.MethodPost, "/api/admin/tools", `{"type":"link","title":"x","content":"y","unlocks_at_level_id":9999}`, admin); w.Code != http.StatusBadRequest {
+		t.Fatalf("bad level ref: want 400, got %d %s", w.Code, w.Body.String())
 	}
-	if w := e.do(t, http.MethodDelete, "/api/admin/tools/"+sid, "", admin); w.Code != http.StatusConflict {
-		t.Fatalf("delete referenced: want 409, got %d", w.Code)
-	}
-	// Detach, then delete -> 204, then 404.
-	if _, err := e.db.Exec(`UPDATE levels SET unlocks_tool_id = NULL`); err != nil {
-		t.Fatalf("detach: %v", err)
-	}
+
+	// Deleting a tool is always allowed (the unlock relation lives on the tool):
+	// delete -> 204, then 404.
 	if w := e.do(t, http.MethodDelete, "/api/admin/tools/"+sid, "", admin); w.Code != http.StatusNoContent {
 		t.Fatalf("delete: want 204, got %d", w.Code)
 	}

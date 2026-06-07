@@ -15,10 +15,11 @@ import (
 var allowedToolTypes = map[string]bool{"link": true, "pdf": true, "builtin": true}
 
 type adminToolRequest struct {
-	Type        string `json:"type"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Content     string `json:"content"`
+	Type             string `json:"type"`
+	Title            string `json:"title"`
+	Description      string `json:"description"`
+	Content          string `json:"content"`
+	UnlocksAtLevelID *int64 `json:"unlocks_at_level_id"`
 }
 
 // toInput validates the request and converts it to a store input, returning a
@@ -43,10 +44,11 @@ func (req adminToolRequest) toInput() (store.ToolInput, string) {
 		return store.ToolInput{}, "description is too long"
 	}
 	return store.ToolInput{
-		Type:        req.Type,
-		Title:       req.Title,
-		Description: req.Description,
-		Content:     req.Content,
+		Type:             req.Type,
+		Title:            req.Title,
+		Description:      req.Description,
+		Content:          req.Content,
+		UnlocksAtLevelID: req.UnlocksAtLevelID,
 	}, ""
 }
 
@@ -68,7 +70,7 @@ func (h *Handlers) AdminCreateTool(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.store.CreateTool(in)
 	if err != nil {
-		respond.Error(w, http.StatusInternalServerError, "could not save tool")
+		writeToolWriteErr(w, err)
 		return
 	}
 	tool, err := h.store.ToolByID(id)
@@ -94,7 +96,7 @@ func (h *Handlers) AdminUpdateTool(w http.ResponseWriter, r *http.Request) {
 			respond.Error(w, http.StatusNotFound, "tool not found")
 			return
 		}
-		respond.Error(w, http.StatusInternalServerError, "could not save tool")
+		writeToolWriteErr(w, err)
 		return
 	}
 	tool, err := h.store.ToolByID(id)
@@ -105,25 +107,31 @@ func (h *Handlers) AdminUpdateTool(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, http.StatusOK, tool)
 }
 
-// AdminDeleteTool handles DELETE /api/admin/tools/{id}. A tool still unlocked by
-// some level cannot be deleted (409), so progression never points at a gap.
+// AdminDeleteTool handles DELETE /api/admin/tools/{id}. The unlock relation lives
+// on the tool, so deleting one never orphans a level and is always allowed.
 func (h *Handlers) AdminDeleteTool(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r)
 	if !ok {
 		return
 	}
 	if err := h.store.DeleteTool(id); err != nil {
-		switch {
-		case errors.Is(err, store.ErrNotFound):
+		if errors.Is(err, store.ErrNotFound) {
 			respond.Error(w, http.StatusNotFound, "tool not found")
-		case errors.Is(err, store.ErrReferenced):
-			respond.Error(w, http.StatusConflict, "tool is still unlocked by a level; detach it there first")
-		default:
-			respond.Error(w, http.StatusInternalServerError, "could not delete tool")
+			return
 		}
+		respond.Error(w, http.StatusInternalServerError, "could not delete tool")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeToolWriteErr maps the store's tool-write sentinels to HTTP statuses.
+func writeToolWriteErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, store.ErrInvalidReference) {
+		respond.Error(w, http.StatusBadRequest, "unlocks_at_level_id references a non-existent level")
+		return
+	}
+	respond.Error(w, http.StatusInternalServerError, "could not save tool")
 }
 
 // decodeToolInput decodes and validates a tool body, writing the 400 itself on

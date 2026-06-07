@@ -18,11 +18,8 @@ var (
 	// existing one (the UNIQUE constraint).
 	ErrOrderIndexTaken = errors.New("order_index already taken")
 	// ErrInvalidReference is returned when a write points a foreign key at a row
-	// that does not exist (e.g. a level's unlocks_tool_id naming a missing tool).
+	// that does not exist (e.g. a tool's unlocks_at_level_id naming a missing level).
 	ErrInvalidReference = errors.New("invalid reference")
-	// ErrReferenced is returned when a row cannot be deleted because another row
-	// still references it (e.g. a tool a level unlocks).
-	ErrReferenced = errors.New("row is still referenced")
 )
 
 // isUniqueViolation reports whether err is a SQLite UNIQUE-constraint failure.

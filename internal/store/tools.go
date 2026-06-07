@@ -16,19 +16,21 @@ type Tool struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Content     string `json:"content"`
+	// UnlocksAtLevelID is the level whose solve unlocks this tool. It is part of
+	// the admin surface only; player reads (UnlockedTools) leave it nil and the
+	// omitempty tag keeps it out of the player payload entirely.
+	UnlocksAtLevelID *int64 `json:"unlocks_at_level_id,omitempty"`
 }
 
-// UnlockedTools returns the tools the user has unlocked: the tools referenced by
-// the unlocks_tool_id of any level they have solved. Levels with a NULL
-// unlocks_tool_id contribute nothing (the JOIN drops them). DISTINCT guards
-// against the same tool being unlocked by more than one solved level. Ordered by
-// tool id for a stable, deterministic toolkit.
+// UnlockedTools returns the tools the user has unlocked: every tool whose
+// unlocks_at_level_id is a level they have solved. Tools with a NULL
+// unlocks_at_level_id are never unlocked (the JOIN drops them). Ordered by tool
+// id for a stable, deterministic toolkit.
 func (s *Store) UnlockedTools(userID int64) ([]Tool, error) {
 	rows, err := s.db.Query(
-		`SELECT DISTINCT t.id, t.type, t.title, COALESCE(t.description, ''), t.content
+		`SELECT t.id, t.type, t.title, COALESCE(t.description, ''), t.content
 		 FROM tools t
-		 JOIN levels l ON l.unlocks_tool_id = t.id
-		 JOIN user_progress up ON up.level_id = l.id AND up.user_id = ?
+		 JOIN user_progress up ON up.level_id = t.unlocks_at_level_id AND up.user_id = ?
 		 ORDER BY t.id`,
 		userID,
 	)
@@ -52,8 +54,8 @@ func (s *Store) UnlockedTools(userID int64) ([]Tool, error) {
 }
 
 // IsToolFileUnlocked reports whether the user may download the toolkit file at
-// the given path. A file is unlocked when some tool the user has earned points
-// at it via tool.content — the contract is that a file tool's content holds the
+// the given path. A file is unlocked when some tool the user has earned exposes
+// it via tool.content — the contract is that a file tool's content holds the
 // path relative to files/tools/ (the same segment the URL carries). The JOIN is
 // the same earned-tools shape as UnlockedTools; link-type tools store a URL in
 // content, so they simply never match a file path.
@@ -62,8 +64,7 @@ func (s *Store) IsToolFileUnlocked(userID int64, path string) (bool, error) {
 	if err := s.db.QueryRow(
 		`SELECT EXISTS(
 		   SELECT 1 FROM tools t
-		   JOIN levels l ON l.unlocks_tool_id = t.id
-		   JOIN user_progress up ON up.level_id = l.id AND up.user_id = ?
+		   JOIN user_progress up ON up.level_id = t.unlocks_at_level_id AND up.user_id = ?
 		   WHERE t.content = ?
 		 )`,
 		userID, path,
@@ -79,17 +80,21 @@ func (s *Store) IsToolFileUnlocked(userID int64, path string) (bool, error) {
 // the difference is only scope (all tools vs unlocked) and the write methods.
 
 // ToolInput is the writable subset of a tool (no id, which the DB owns).
+// UnlocksAtLevelID is nil when the tool is not tied to any level (never auto-
+// unlocked); a non-nil value must name an existing level or the write fails.
 type ToolInput struct {
-	Type        string
-	Title       string
-	Description string
-	Content     string
+	Type             string
+	Title            string
+	Description      string
+	Content          string
+	UnlocksAtLevelID *int64
 }
 
 // ListAllTools returns every tool ordered by id, for the admin list.
 func (s *Store) ListAllTools() ([]Tool, error) {
 	rows, err := s.db.Query(
-		`SELECT id, type, title, COALESCE(description, ''), content FROM tools ORDER BY id`,
+		`SELECT id, type, title, COALESCE(description, ''), content, unlocks_at_level_id
+		 FROM tools ORDER BY id`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list all tools: %w", err)
@@ -98,9 +103,9 @@ func (s *Store) ListAllTools() ([]Tool, error) {
 
 	tools := []Tool{} // non-nil so JSON encodes [] not null
 	for rows.Next() {
-		var t Tool
-		if err := rows.Scan(&t.ID, &t.Type, &t.Title, &t.Description, &t.Content); err != nil {
-			return nil, fmt.Errorf("scan tool: %w", err)
+		t, err := scanAdminTool(rows)
+		if err != nil {
+			return nil, err
 		}
 		tools = append(tools, t)
 	}
@@ -112,11 +117,11 @@ func (s *Store) ListAllTools() ([]Tool, error) {
 
 // ToolByID returns one tool, or ErrNotFound.
 func (s *Store) ToolByID(id int64) (Tool, error) {
-	var t Tool
-	err := s.db.QueryRow(
-		`SELECT id, type, title, COALESCE(description, ''), content FROM tools WHERE id = ?`,
+	t, err := scanAdminTool(s.db.QueryRow(
+		`SELECT id, type, title, COALESCE(description, ''), content, unlocks_at_level_id
+		 FROM tools WHERE id = ?`,
 		id,
-	).Scan(&t.ID, &t.Type, &t.Title, &t.Description, &t.Content)
+	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Tool{}, ErrNotFound
 	}
@@ -126,27 +131,45 @@ func (s *Store) ToolByID(id int64) (Tool, error) {
 	return t, nil
 }
 
-// CreateTool inserts a tool and returns its new id.
+// scanAdminTool scans one tool row including the nullable unlocks_at_level_id,
+// flattening it into a *int64. Works for both *sql.Row and *sql.Rows.
+func scanAdminTool(sc interface{ Scan(...any) error }) (Tool, error) {
+	var t Tool
+	var levelID sql.NullInt64
+	if err := sc.Scan(&t.ID, &t.Type, &t.Title, &t.Description, &t.Content, &levelID); err != nil {
+		return Tool{}, err
+	}
+	if levelID.Valid {
+		t.UnlocksAtLevelID = &levelID.Int64
+	}
+	return t, nil
+}
+
+// CreateTool inserts a tool and returns its new id. A bad unlocks_at_level_id
+// (no such level) maps to ErrInvalidReference so the handler can answer 400.
 func (s *Store) CreateTool(in ToolInput) (int64, error) {
 	res, err := s.db.Exec(
-		`INSERT INTO tools (type, title, description, content) VALUES (?, ?, ?, ?)`,
-		in.Type, in.Title, in.Description, in.Content,
+		`INSERT INTO tools (type, title, description, content, unlocks_at_level_id)
+		 VALUES (?, ?, ?, ?, ?)`,
+		in.Type, in.Title, in.Description, in.Content, in.UnlocksAtLevelID,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("create tool: %w", err)
+		return 0, mapToolWriteErr(err)
 	}
 	id, _ := res.LastInsertId()
 	return id, nil
 }
 
-// UpdateTool overwrites a tool by id. Returns ErrNotFound if no such tool.
+// UpdateTool overwrites a tool by id. Returns ErrNotFound if no such tool, and
+// the same mapped reference error as CreateTool.
 func (s *Store) UpdateTool(id int64, in ToolInput) error {
 	res, err := s.db.Exec(
-		`UPDATE tools SET type = ?, title = ?, description = ?, content = ? WHERE id = ?`,
-		in.Type, in.Title, in.Description, in.Content, id,
+		`UPDATE tools SET type = ?, title = ?, description = ?, content = ?, unlocks_at_level_id = ?
+		 WHERE id = ?`,
+		in.Type, in.Title, in.Description, in.Content, in.UnlocksAtLevelID, id,
 	)
 	if err != nil {
-		return fmt.Errorf("update tool: %w", err)
+		return mapToolWriteErr(err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -156,14 +179,12 @@ func (s *Store) UpdateTool(id int64, in ToolInput) error {
 }
 
 // DeleteTool removes a tool by id. Returns ErrNotFound if there was nothing to
-// delete, and ErrReferenced if a level still unlocks it — levels.unlocks_tool_id
-// is a RESTRICT foreign key, so the delete is blocked rather than orphaning it.
+// delete. Nothing references a tool any more, so a delete never has to be
+// blocked — a level that pointed here is unaffected (the relation lives on the
+// tool).
 func (s *Store) DeleteTool(id int64) error {
 	res, err := s.db.Exec(`DELETE FROM tools WHERE id = ?`, id)
 	if err != nil {
-		if isForeignKeyViolation(err) {
-			return ErrReferenced
-		}
 		return fmt.Errorf("delete tool: %w", err)
 	}
 	n, _ := res.RowsAffected()
@@ -171,4 +192,14 @@ func (s *Store) DeleteTool(id int64) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// mapToolWriteErr translates SQLite constraint failures on a tool write into the
+// store's sentinels. The only outbound constraint is the unlocks_at_level_id
+// foreign key.
+func mapToolWriteErr(err error) error {
+	if isForeignKeyViolation(err) {
+		return ErrInvalidReference
+	}
+	return fmt.Errorf("tool write: %w", err)
 }

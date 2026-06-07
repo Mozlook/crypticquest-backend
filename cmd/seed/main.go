@@ -30,19 +30,19 @@ type seedFile struct {
 }
 
 type seedTool struct {
-	Key         string `json:"key"`
-	Type        string `json:"type"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Content     string `json:"content"`
+	Type           string  `json:"type"`
+	Title          string  `json:"title"`
+	Description    string  `json:"description"`
+	Content        string  `json:"content"`
+	UnlocksAtLevel *string `json:"unlocks_at_level"` // level key; nil / null = unlocks nothing
 }
 
 type seedLevel struct {
+	Key         string   `json:"key"` // referenced by a tool's unlocks_at_level
 	OrderIndex  int      `json:"order_index"`
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
 	Flag        string   `json:"flag"`
-	UnlocksTool *string  `json:"unlocks_tool"` // nil / null = unlocks nothing
 	Hints       []string `json:"hints"`
 }
 
@@ -87,10 +87,9 @@ func load(database *sql.DB, sf seedFile) error {
 	}
 	defer tx.Rollback() // no-op after a successful Commit
 
-	// Wipe in FK-safe order: hints and levels are children/referrers; levels
-	// reference tools (RESTRICT), so levels must go before tools. Deleting levels
-	// cascades to user_progress.
-	for _, table := range []string{"hints", "levels", "tools"} {
+	// Wipe in FK-safe order: hints cascade off levels, tools reference levels
+	// (SET NULL). Delete tools before levels so no tool transiently dangles.
+	for _, table := range []string{"hints", "tools", "levels"} {
 		if _, err := tx.Exec("DELETE FROM " + table); err != nil {
 			return fmt.Errorf("clear %s: %w", table, err)
 		}
@@ -101,52 +100,51 @@ func load(database *sql.DB, sf seedFile) error {
 		return fmt.Errorf("reset id counters: %w", err)
 	}
 
-	// Tools first; remember each key's new id so levels can reference it.
-	toolID := map[string]int64{}
-	for _, t := range sf.Tools {
-		if t.Key == "" {
-			return fmt.Errorf("tool %q has no key", t.Title)
-		}
-		if _, dup := toolID[t.Key]; dup {
-			return fmt.Errorf("duplicate tool key %q", t.Key)
-		}
-		res, err := tx.Exec(
-			`INSERT INTO tools (type, title, description, content) VALUES (?, ?, ?, ?)`,
-			t.Type, t.Title, t.Description, t.Content,
-		)
-		if err != nil {
-			return fmt.Errorf("insert tool %q: %w", t.Key, err)
-		}
-		id, _ := res.LastInsertId()
-		toolID[t.Key] = id
-	}
-
+	// Levels first; remember each key's new id so tools can reference it.
+	levelID := map[string]int64{}
 	for _, l := range sf.Levels {
-		var unlocks any // NULL unless the level names a known tool
-		if l.UnlocksTool != nil && *l.UnlocksTool != "" {
-			id, ok := toolID[*l.UnlocksTool]
-			if !ok {
-				return fmt.Errorf("level %q unlocks unknown tool %q", l.Title, *l.UnlocksTool)
-			}
-			unlocks = id
+		if l.Key == "" {
+			return fmt.Errorf("level %q has no key", l.Title)
+		}
+		if _, dup := levelID[l.Key]; dup {
+			return fmt.Errorf("duplicate level key %q", l.Key)
 		}
 		res, err := tx.Exec(
-			`INSERT INTO levels (order_index, title, description, flag, unlocks_tool_id)
-			 VALUES (?, ?, ?, ?, ?)`,
-			l.OrderIndex, l.Title, l.Description, l.Flag, unlocks,
+			`INSERT INTO levels (order_index, title, description, flag)
+			 VALUES (?, ?, ?, ?)`,
+			l.OrderIndex, l.Title, l.Description, l.Flag,
 		)
 		if err != nil {
 			return fmt.Errorf("insert level %q: %w", l.Title, err)
 		}
-		levelID, _ := res.LastInsertId()
+		id, _ := res.LastInsertId()
+		levelID[l.Key] = id
 
 		for i, text := range l.Hints {
 			if _, err := tx.Exec(
 				`INSERT INTO hints (level_id, order_index, text) VALUES (?, ?, ?)`,
-				levelID, i+1, text,
+				id, i+1, text,
 			); err != nil {
 				return fmt.Errorf("insert hint %d for level %q: %w", i+1, l.Title, err)
 			}
+		}
+	}
+
+	for _, t := range sf.Tools {
+		var unlocks any // NULL unless the tool names a known level
+		if t.UnlocksAtLevel != nil && *t.UnlocksAtLevel != "" {
+			id, ok := levelID[*t.UnlocksAtLevel]
+			if !ok {
+				return fmt.Errorf("tool %q unlocks at unknown level %q", t.Title, *t.UnlocksAtLevel)
+			}
+			unlocks = id
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO tools (type, title, description, content, unlocks_at_level_id)
+			 VALUES (?, ?, ?, ?, ?)`,
+			t.Type, t.Title, t.Description, t.Content, unlocks,
+		); err != nil {
+			return fmt.Errorf("insert tool %q: %w", t.Title, err)
 		}
 	}
 

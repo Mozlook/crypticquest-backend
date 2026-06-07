@@ -116,26 +116,19 @@ func TestLevelForSubmit(t *testing.T) {
 func TestAdminLevelCRUD(t *testing.T) {
 	s := newTestStore(t)
 
-	// A tool to reference, and a level unlocking it.
-	res, err := s.db.Exec(`INSERT INTO tools (type, title, content) VALUES ('link', 'CC', 'http://x')`)
-	if err != nil {
-		t.Fatalf("insert tool: %v", err)
-	}
-	toolID, _ := res.LastInsertId()
-
 	id, err := s.CreateLevel(AdminLevelInput{
-		OrderIndex: 10, Title: "L10", Description: "d", Flag: "flag{a}", UnlocksToolID: &toolID,
+		OrderIndex: 10, Title: "L10", Description: "d", Flag: "flag{a}",
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	// Read back, flag and tool ref included.
+	// Read back, flag included.
 	got, err := s.AdminLevelByID(id)
 	if err != nil {
 		t.Fatalf("by id: %v", err)
 	}
-	if got.Flag != "flag{a}" || got.OrderIndex != 10 || got.UnlocksToolID == nil || *got.UnlocksToolID != toolID {
+	if got.Flag != "flag{a}" || got.OrderIndex != 10 {
 		t.Fatalf("unexpected level: %+v", got)
 	}
 
@@ -144,18 +137,12 @@ func TestAdminLevelCRUD(t *testing.T) {
 		t.Fatalf("dup order_index: want ErrOrderIndexTaken, got %v", err)
 	}
 
-	// Bad tool reference -> ErrInvalidReference.
-	bad := int64(9999)
-	if _, err := s.CreateLevel(AdminLevelInput{OrderIndex: 20, Title: "x", Description: "d", Flag: "f", UnlocksToolID: &bad}); !errors.Is(err, ErrInvalidReference) {
-		t.Fatalf("bad tool ref: want ErrInvalidReference, got %v", err)
-	}
-
-	// Update: change title/flag and drop the tool link.
+	// Update: change title/flag.
 	if err := s.UpdateLevel(id, AdminLevelInput{OrderIndex: 10, Title: "L10b", Description: "d2", Flag: "flag{b}"}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	got, _ = s.AdminLevelByID(id)
-	if got.Title != "L10b" || got.Flag != "flag{b}" || got.UnlocksToolID != nil {
+	if got.Title != "L10b" || got.Flag != "flag{b}" {
 		t.Fatalf("after update: %+v", got)
 	}
 

@@ -78,9 +78,9 @@ Six tables (`migrations/000001_init_schema.up.sql`):
 |-------|---------|---------------------|
 | `users` | accounts | `username` unique; `role` defaults to `player` |
 | `sessions` | login sessions | `token` PK; `user_id` → `users` **ON DELETE CASCADE** |
-| `levels` | puzzles | `order_index` **unique** (ordering, with gaps); `unlocks_tool_id` → `tools` (**RESTRICT**: a referenced tool can't be deleted) |
+| `levels` | puzzles | `order_index` **unique** (ordering, with gaps) |
 | `hints` | per-level hints | `level_id` → `levels` **CASCADE**; ordered by `order_index` |
-| `tools` | toolkit entries | `type` (`link`/`pdf`/`builtin`), `content` |
+| `tools` | toolkit entries | `type` (`link`/`pdf`/`builtin`), `content`; `unlocks_at_level_id` → `levels` (**ON DELETE SET NULL**) — one level can unlock many tools |
 | `user_progress` | which levels a user solved | `user_id` & `level_id` → CASCADE; **`UNIQUE(user_id, level_id)`** makes recording a solve idempotent |
 
 Derived concepts (computed, not stored):
@@ -124,9 +124,9 @@ admin routes additionally require `role == admin`.
 
 | Method & path | Notes |
 |---|---|
-| `GET/POST /api/admin/levels`, `PUT/DELETE /api/admin/levels/{id}` | full level **including the flag**; `409` duplicate `order_index`, `400` bad `unlocks_tool_id` |
+| `GET/POST /api/admin/levels`, `PUT/DELETE /api/admin/levels/{id}` | full level **including the flag**; `409` duplicate `order_index` |
 | `GET/PUT /api/admin/levels/{id}/hints` | `PUT {hints: string[]}` replaces the whole ordered list |
-| `GET/POST /api/admin/tools`, `PUT/DELETE /api/admin/tools/{id}` | `type` whitelist; deleting a referenced tool → `409` |
+| `GET/POST /api/admin/tools`, `PUT/DELETE /api/admin/tools/{id}` | `type` whitelist; `unlocks_at_level_id` sets which level unlocks the tool (`400` if it names no level); delete always allowed |
 | `GET /api/admin/users`, `PUT /api/admin/users/{id}` | list with `current_level`; `PUT {role?, level?}` |
 | `POST /api/admin/users/{id}/reset-password` | returns a one-time `{password}` and invalidates the user's sessions |
 | `DELETE /api/admin/users/{id}` | self-demote / self-delete are blocked with `409` |

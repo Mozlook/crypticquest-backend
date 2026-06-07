@@ -12,36 +12,30 @@ func TestIsToolFileUnlocked(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 
-	// A pdf tool whose content is the file path, and a link tool (URL content).
-	res, err := s.db.Exec(
-		`INSERT INTO tools (type, title, content) VALUES ('pdf', 'nmap guide', 'nmap-cheatsheet.pdf')`,
-	)
-	if err != nil {
-		t.Fatalf("insert pdf tool: %v", err)
-	}
-	pdfTool, _ := res.LastInsertId()
-	res, err = s.db.Exec(
-		`INSERT INTO tools (type, title, content) VALUES ('pdf', 'sha guide', 'sha-explained.pdf')`,
-	)
-	if err != nil {
-		t.Fatalf("insert second pdf tool: %v", err)
-	}
-	lockedTool, _ := res.LastInsertId()
-
-	// L10 unlocks the nmap pdf, L20 unlocks the sha pdf.
-	res, err = s.db.Exec(
-		`INSERT INTO levels (order_index, title, description, flag, unlocks_tool_id) VALUES (10, 'L10', 'd', 'flag', ?)`,
-		pdfTool,
-	)
+	// Two levels; tools hang off them.
+	res, err := s.db.Exec(`INSERT INTO levels (order_index, title, description, flag) VALUES (10, 'L10', 'd', 'flag')`)
 	if err != nil {
 		t.Fatalf("insert level: %v", err)
 	}
 	l10, _ := res.LastInsertId()
-	if _, err := s.db.Exec(
-		`INSERT INTO levels (order_index, title, description, flag, unlocks_tool_id) VALUES (20, 'L20', 'd', 'flag', ?)`,
-		lockedTool,
-	); err != nil {
+	res, err = s.db.Exec(`INSERT INTO levels (order_index, title, description, flag) VALUES (20, 'L20', 'd', 'flag')`)
+	if err != nil {
 		t.Fatalf("insert locked level: %v", err)
+	}
+	l20, _ := res.LastInsertId()
+
+	// A pdf tool unlocked at L10, another at L20.
+	if _, err := s.db.Exec(
+		`INSERT INTO tools (type, title, content, unlocks_at_level_id) VALUES ('pdf', 'nmap guide', 'nmap-cheatsheet.pdf', ?)`,
+		l10,
+	); err != nil {
+		t.Fatalf("insert pdf tool: %v", err)
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO tools (type, title, content, unlocks_at_level_id) VALUES ('pdf', 'sha guide', 'sha-explained.pdf', ?)`,
+		l20,
+	); err != nil {
+		t.Fatalf("insert second pdf tool: %v", err)
 	}
 
 	// Nothing solved yet -> nothing unlocked.
@@ -73,29 +67,11 @@ func TestUnlockedTools(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 
-	// Two tools; one has a NULL description to exercise the COALESCE.
-	res, err := s.db.Exec(
-		`INSERT INTO tools (type, title, description, content) VALUES ('cipher', 'Caesar wheel', 'rotates letters', 'wheel-data')`,
-	)
-	if err != nil {
-		t.Fatalf("insert tool: %v", err)
-	}
-	toolA, _ := res.LastInsertId()
-
-	res, err = s.db.Exec(
-		`INSERT INTO tools (type, title, content) VALUES ('ref', 'ASCII table', 'ascii-data')`,
-	)
-	if err != nil {
-		t.Fatalf("insert tool: %v", err)
-	}
-	toolB, _ := res.LastInsertId()
-
-	// L10 unlocks toolA, L20 unlocks toolB, L30 unlocks nothing (NULL).
+	// Three levels.
 	levelID := map[int]int64{}
-	insLevel := func(oi int, unlocks any) int64 {
+	insLevel := func(oi int) int64 {
 		res, err := s.db.Exec(
-			`INSERT INTO levels (order_index, title, description, flag, unlocks_tool_id) VALUES (?, ?, 'd', 'flag', ?)`,
-			oi, "L", unlocks,
+			`INSERT INTO levels (order_index, title, description, flag) VALUES (?, 'L', 'd', 'flag')`, oi,
 		)
 		if err != nil {
 			t.Fatalf("insert level oi=%d: %v", oi, err)
@@ -103,9 +79,33 @@ func TestUnlockedTools(t *testing.T) {
 		id, _ := res.LastInsertId()
 		return id
 	}
-	levelID[10] = insLevel(10, toolA)
-	levelID[20] = insLevel(20, toolB)
-	levelID[30] = insLevel(30, nil)
+	levelID[10] = insLevel(10)
+	levelID[20] = insLevel(20)
+	levelID[30] = insLevel(30)
+
+	// toolA unlocks at L10 (has a description), toolB at L20 (NULL description to
+	// exercise COALESCE), toolC unlocks at no level (NULL -> never unlocked).
+	res, err := s.db.Exec(
+		`INSERT INTO tools (type, title, description, content, unlocks_at_level_id) VALUES ('cipher', 'Caesar wheel', 'rotates letters', 'wheel-data', ?)`,
+		levelID[10],
+	)
+	if err != nil {
+		t.Fatalf("insert toolA: %v", err)
+	}
+	toolA, _ := res.LastInsertId()
+	res, err = s.db.Exec(
+		`INSERT INTO tools (type, title, content, unlocks_at_level_id) VALUES ('ref', 'ASCII table', 'ascii-data', ?)`,
+		levelID[20],
+	)
+	if err != nil {
+		t.Fatalf("insert toolB: %v", err)
+	}
+	toolB, _ := res.LastInsertId()
+	if _, err := s.db.Exec(
+		`INSERT INTO tools (type, title, content, unlocks_at_level_id) VALUES ('ref', 'orphan', 'orphan-data', NULL)`,
+	); err != nil {
+		t.Fatalf("insert toolC: %v", err)
+	}
 
 	// Fresh account: nothing solved, so no tools unlocked. Want [] not nil.
 	got, err := s.UnlockedTools(uid)
@@ -135,7 +135,8 @@ func TestUnlockedTools(t *testing.T) {
 		t.Fatalf("toolA fields wrong: %+v", got[0])
 	}
 
-	// Solve L20 (unlocks toolB) and L30 (unlocks nothing) -> toolA + toolB only.
+	// Solve L20 (unlocks toolB) and L30 (unlocks nothing) -> toolA + toolB only;
+	// toolC stays locked because it is tied to no level.
 	for _, oi := range []int{20, 30} {
 		if _, err := s.db.Exec(
 			`INSERT INTO user_progress (user_id, level_id) VALUES (?, ?)`,
@@ -160,21 +161,35 @@ func TestUnlockedTools(t *testing.T) {
 func TestAdminToolCRUD(t *testing.T) {
 	s := newTestStore(t)
 
-	id, err := s.CreateTool(ToolInput{Type: "link", Title: "CyberChef", Description: "swiss army", Content: "http://x"})
+	// A level for the tool to unlock at.
+	levelID, err := s.CreateLevel(AdminLevelInput{OrderIndex: 10, Title: "L10", Description: "d", Flag: "f"})
+	if err != nil {
+		t.Fatalf("create level: %v", err)
+	}
+
+	id, err := s.CreateTool(ToolInput{Type: "link", Title: "CyberChef", Description: "swiss army", Content: "http://x", UnlocksAtLevelID: &levelID})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
 	got, err := s.ToolByID(id)
-	if err != nil || got.Title != "CyberChef" || got.Type != "link" || got.Description != "swiss army" {
+	if err != nil || got.Title != "CyberChef" || got.Type != "link" || got.Description != "swiss army" ||
+		got.UnlocksAtLevelID == nil || *got.UnlocksAtLevelID != levelID {
 		t.Fatalf("by id: %+v err=%v", got, err)
 	}
 
+	// A bad level reference -> ErrInvalidReference.
+	bad := int64(9999)
+	if _, err := s.CreateTool(ToolInput{Type: "link", Title: "x", Content: "y", UnlocksAtLevelID: &bad}); !errors.Is(err, ErrInvalidReference) {
+		t.Fatalf("bad level ref: want ErrInvalidReference, got %v", err)
+	}
+
+	// Update: change fields and drop the level link.
 	if err := s.UpdateTool(id, ToolInput{Type: "pdf", Title: "Guide", Description: "", Content: "guide.pdf"}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	got, _ = s.ToolByID(id)
-	if got.Type != "pdf" || got.Title != "Guide" || got.Description != "" || got.Content != "guide.pdf" {
+	if got.Type != "pdf" || got.Title != "Guide" || got.Description != "" || got.Content != "guide.pdf" || got.UnlocksAtLevelID != nil {
 		t.Fatalf("after update: %+v", got)
 	}
 
@@ -187,20 +202,20 @@ func TestAdminToolCRUD(t *testing.T) {
 		t.Fatalf("list all: %+v err=%v", all, err)
 	}
 
-	// A level unlocking the tool blocks its deletion (RESTRICT FK -> ErrReferenced).
-	if _, err := s.db.Exec(
-		`INSERT INTO levels (order_index, title, description, flag, unlocks_tool_id) VALUES (10, 'L', 'd', 'f', ?)`, id,
-	); err != nil {
-		t.Fatalf("insert referencing level: %v", err)
+	// Deleting a level a tool points at un-assigns the tool (ON DELETE SET NULL),
+	// it does not block.
+	if err := s.UpdateTool(id, ToolInput{Type: "pdf", Title: "Guide", Content: "guide.pdf", UnlocksAtLevelID: &levelID}); err != nil {
+		t.Fatalf("re-link: %v", err)
 	}
-	if err := s.DeleteTool(id); !errors.Is(err, ErrReferenced) {
-		t.Fatalf("delete referenced: want ErrReferenced, got %v", err)
+	if err := s.DeleteLevel(levelID); err != nil {
+		t.Fatalf("delete level: %v", err)
+	}
+	got, _ = s.ToolByID(id)
+	if got.UnlocksAtLevelID != nil {
+		t.Fatalf("after level delete: tool should be un-assigned, got %+v", got)
 	}
 
-	// Remove the reference, then delete succeeds; second delete is 404.
-	if _, err := s.db.Exec(`UPDATE levels SET unlocks_tool_id = NULL WHERE unlocks_tool_id = ?`, id); err != nil {
-		t.Fatalf("clear ref: %v", err)
-	}
+	// Deleting the tool always succeeds; a second delete is 404.
 	if err := s.DeleteTool(id); err != nil {
 		t.Fatalf("delete: %v", err)
 	}

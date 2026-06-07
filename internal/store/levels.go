@@ -115,31 +115,30 @@ func (s *Store) LevelForSubmit(levelID int64) (orderIndex int, flag string, err 
 // LevelForSubmit. They back the role-gated /api/admin/levels endpoints. Keep the
 // flag out of any struct served to players (see LevelListItem / LevelDetail).
 
-// AdminLevel is the full level as an admin sees it — flag included. UnlocksToolID
-// is nil when the level unlocks no tool.
+// AdminLevel is the full level as an admin sees it — flag included. Which tools a
+// level unlocks lives on the tools side now (tools.unlocks_at_level_id), so a
+// level no longer carries a tool reference.
 type AdminLevel struct {
-	ID            int64  `json:"id"`
-	OrderIndex    int    `json:"order_index"`
-	Title         string `json:"title"`
-	Description   string `json:"description"`
-	Flag          string `json:"flag"`
-	UnlocksToolID *int64 `json:"unlocks_tool_id"`
+	ID          int64  `json:"id"`
+	OrderIndex  int    `json:"order_index"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Flag        string `json:"flag"`
 }
 
 // AdminLevelInput is the writable subset of a level (no id, which the DB owns).
 type AdminLevelInput struct {
-	OrderIndex    int
-	Title         string
-	Description   string
-	Flag          string
-	UnlocksToolID *int64
+	OrderIndex  int
+	Title       string
+	Description string
+	Flag        string
 }
 
 // ListAllLevels returns every level (flag included) ordered by order_index, for
 // the admin list. Unlike ListAccessibleLevels there is no per-user gate.
 func (s *Store) ListAllLevels() ([]AdminLevel, error) {
 	rows, err := s.db.Query(
-		`SELECT id, order_index, title, description, flag, unlocks_tool_id
+		`SELECT id, order_index, title, description, flag
 		 FROM levels ORDER BY order_index`,
 	)
 	if err != nil {
@@ -164,7 +163,7 @@ func (s *Store) ListAllLevels() ([]AdminLevel, error) {
 // AdminLevelByID returns one level with its flag, or ErrNotFound.
 func (s *Store) AdminLevelByID(id int64) (AdminLevel, error) {
 	row := s.db.QueryRow(
-		`SELECT id, order_index, title, description, flag, unlocks_tool_id
+		`SELECT id, order_index, title, description, flag
 		 FROM levels WHERE id = ?`,
 		id,
 	)
@@ -179,13 +178,12 @@ func (s *Store) AdminLevelByID(id int64) (AdminLevel, error) {
 }
 
 // CreateLevel inserts a level and returns its new id. Maps a duplicate
-// order_index to ErrOrderIndexTaken and a bad unlocks_tool_id to
-// ErrInvalidReference so the handler can answer 409 / 400.
+// order_index to ErrOrderIndexTaken so the handler can answer 409.
 func (s *Store) CreateLevel(in AdminLevelInput) (int64, error) {
 	res, err := s.db.Exec(
-		`INSERT INTO levels (order_index, title, description, flag, unlocks_tool_id)
-		 VALUES (?, ?, ?, ?, ?)`,
-		in.OrderIndex, in.Title, in.Description, in.Flag, in.UnlocksToolID,
+		`INSERT INTO levels (order_index, title, description, flag)
+		 VALUES (?, ?, ?, ?)`,
+		in.OrderIndex, in.Title, in.Description, in.Flag,
 	)
 	if err != nil {
 		return 0, mapLevelWriteErr(err)
@@ -199,9 +197,9 @@ func (s *Store) CreateLevel(in AdminLevelInput) (int64, error) {
 func (s *Store) UpdateLevel(id int64, in AdminLevelInput) error {
 	res, err := s.db.Exec(
 		`UPDATE levels
-		 SET order_index = ?, title = ?, description = ?, flag = ?, unlocks_tool_id = ?
+		 SET order_index = ?, title = ?, description = ?, flag = ?
 		 WHERE id = ?`,
-		in.OrderIndex, in.Title, in.Description, in.Flag, in.UnlocksToolID, id,
+		in.OrderIndex, in.Title, in.Description, in.Flag, id,
 	)
 	if err != nil {
 		return mapLevelWriteErr(err)
@@ -227,28 +225,22 @@ func (s *Store) DeleteLevel(id int64) error {
 	return nil
 }
 
-// scanAdminLevel scans one level row, flattening the nullable unlocks_tool_id
-// into a *int64. Works for both *sql.Row and *sql.Rows.
+// scanAdminLevel scans one level row. Works for both *sql.Row and *sql.Rows.
 func scanAdminLevel(sc interface{ Scan(...any) error }) (AdminLevel, error) {
 	var l AdminLevel
-	var toolID sql.NullInt64
-	if err := sc.Scan(&l.ID, &l.OrderIndex, &l.Title, &l.Description, &l.Flag, &toolID); err != nil {
+	if err := sc.Scan(&l.ID, &l.OrderIndex, &l.Title, &l.Description, &l.Flag); err != nil {
 		return AdminLevel{}, err
-	}
-	if toolID.Valid {
-		l.UnlocksToolID = &toolID.Int64
 	}
 	return l, nil
 }
 
 // mapLevelWriteErr translates SQLite constraint failures on a level write into
-// the store's sentinels; anything else is wrapped.
+// the store's sentinels; anything else is wrapped. A level has no outbound
+// foreign key now, so order_index uniqueness is the only constraint to map.
 func mapLevelWriteErr(err error) error {
 	switch {
 	case isUniqueViolation(err):
 		return ErrOrderIndexTaken
-	case isForeignKeyViolation(err):
-		return ErrInvalidReference
 	default:
 		return fmt.Errorf("level write: %w", err)
 	}
