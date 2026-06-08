@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds all runtime configuration for the backend.
@@ -18,10 +19,11 @@ type Config struct {
 	// files/levels/{id}/ and files/tools/. Served only through the authorization
 	// gate, never a bare FileServer.
 	FilesDir string
-	// AllowedOrigin is the single frontend origin permitted by CORS.
-	// With credentialed requests the wildcard "*" is forbidden, so this
-	// must be an explicit origin (e.g. https://app.example.com).
-	AllowedOrigin string
+	// AllowedOrigins is the set of frontend origins permitted by CORS, parsed
+	// from a comma-separated ALLOWED_ORIGIN (e.g. "https://app.example.com,
+	// https://app.netlify.app"). With credentialed requests the wildcard "*"
+	// is forbidden, so each must be an explicit origin.
+	AllowedOrigins []string
 
 	// Session cookie settings.
 	CookieDomain   string // empty = host-only cookie (fine for local dev)
@@ -40,7 +42,7 @@ func Load() Config {
 		Port:           getEnv("PORT", "8080"),
 		DBPath:         getEnv("DB_PATH", "ctf.db"),
 		FilesDir:       getEnv("FILES_DIR", "files"),
-		AllowedOrigin:  getEnv("ALLOWED_ORIGIN", "http://localhost:5173"),
+		AllowedOrigins: getEnvList("ALLOWED_ORIGIN", []string{"http://localhost:5173"}),
 		CookieDomain:   getEnv("COOKIE_DOMAIN", ""),
 		CookieSecure:   getEnvBool("COOKIE_SECURE", false),
 		CookieSameSite: getEnv("COOKIE_SAMESITE", "Lax"),
@@ -55,6 +57,25 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// getEnvList parses a comma-separated environment variable into a slice,
+// trimming spaces and dropping empties. Returns fallback if unset or empty.
+func getEnvList(key string, fallback []string) []string {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if s := strings.TrimSpace(part); s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return fallback
+	}
+	return out
 }
 
 // getEnvBool parses a boolean environment variable, or returns fallback.

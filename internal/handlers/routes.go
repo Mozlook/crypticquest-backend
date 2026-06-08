@@ -54,7 +54,7 @@ func (h *Handlers) Routes() http.Handler {
 	// Outermost to innermost: Logging (times the whole chain and sees the final
 	// status) → Recover (turns a handler panic into a logged 500) → CORS (covers
 	// OPTIONS preflight, which matches no route on its own) → router.
-	return middleware.Logging(middleware.Recover(middleware.CORS(h.allowedOrigin)(mux)))
+	return middleware.Logging(middleware.Recover(middleware.CORS(h.allowedOrigins)(mux)))
 }
 
 // health is a simple liveness check.

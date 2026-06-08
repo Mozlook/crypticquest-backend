@@ -14,7 +14,7 @@ func TestCORS(t *testing.T) {
 		ran = true
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := CORS(allowed)(next)
+	handler := CORS([]string{allowed})(next)
 
 	do := func(method, origin, reqMethod string) *httptest.ResponseRecorder {
 		ran = false
@@ -89,6 +89,28 @@ func TestCORS(t *testing.T) {
 		}
 		if rec.Header().Get("Access-Control-Allow-Origin") != "" {
 			t.Fatal("disallowed preflight must not echo origin")
+		}
+	})
+
+	t.Run("allowlist echoes whichever allowed origin made the request", func(t *testing.T) {
+		o1, o2 := "https://app.example.com", "https://app.netlify.app"
+		multi := CORS([]string{o1, o2})(next)
+		for _, want := range []string{o1, o2} {
+			r := httptest.NewRequest(http.MethodGet, "/api/levels", nil)
+			r.Header.Set("Origin", want)
+			rec := httptest.NewRecorder()
+			multi.ServeHTTP(rec, r)
+			if got := rec.Header().Get("Access-Control-Allow-Origin"); got != want {
+				t.Fatalf("ACAO = %q, want %q (the requesting origin)", got, want)
+			}
+		}
+		// An origin not on the list still gets nothing.
+		r := httptest.NewRequest(http.MethodGet, "/api/levels", nil)
+		r.Header.Set("Origin", "https://evil.example.com")
+		rec := httptest.NewRecorder()
+		multi.ServeHTTP(rec, r)
+		if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Fatal("must not echo an origin outside the allowlist")
 		}
 	})
 

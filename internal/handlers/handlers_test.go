@@ -42,7 +42,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	st := store.New(database)
 	filesDir := t.TempDir()
-	h := New(st, auth.NewSessionCookie("", false, "Lax"), filesDir, "https://app.example.com")
+	h := New(st, auth.NewSessionCookie("", false, "Lax"), filesDir, []string{"https://app.example.com"})
 	return &testEnv{router: h.Routes(), db: database, st: st, filesDir: filesDir}
 }
 

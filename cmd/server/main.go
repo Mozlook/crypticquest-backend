@@ -30,7 +30,7 @@ func main() {
 	bootstrapAdmin(st, cfg)
 
 	cookie := auth.NewSessionCookie(cfg.CookieDomain, cfg.CookieSecure, cfg.CookieSameSite)
-	h := handlers.New(st, cookie, cfg.FilesDir, cfg.AllowedOrigin)
+	h := handlers.New(st, cookie, cfg.FilesDir, cfg.AllowedOrigins)
 
 	addr := ":" + cfg.Port
 	log.Printf("CrypticQuest backend listening on %s", addr)

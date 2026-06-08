@@ -3,12 +3,16 @@ package middleware
 import "net/http"
 
 // CORS returns middleware that enables credentialed cross-origin requests from a
-// single trusted origin (the Netlify frontend in prod, localhost in dev). With
-// credentials the wildcard "*" is forbidden, so the allowed origin is echoed
-// back only when it matches exactly; any other origin gets no CORS headers and
-// the browser blocks the response. Preflight (OPTIONS) requests are answered here
-// with 204 and never reach the router.
-func CORS(allowedOrigin string) func(http.Handler) http.Handler {
+// set of trusted origins (the deployed frontends in prod, localhost in dev).
+// With credentials the wildcard "*" is forbidden, so the request's origin is
+// echoed back only when it is on the allowlist; any other origin gets no CORS
+// headers and the browser blocks the response. Preflight (OPTIONS) requests are
+// answered here with 204 and never reach the router.
+func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
+	allowed := make(map[string]bool, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		allowed[o] = true
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Vary: Origin always, so a shared cache never serves a CORS response
@@ -19,9 +23,11 @@ func CORS(allowedOrigin string) func(http.Handler) http.Handler {
 			isPreflight := r.Method == http.MethodOptions &&
 				r.Header.Get("Access-Control-Request-Method") != ""
 
-			if origin != "" && origin == allowedOrigin {
+			if origin != "" && allowed[origin] {
 				h := w.Header()
-				h.Set("Access-Control-Allow-Origin", allowedOrigin)
+				// Echo the request's origin (never "*"), which is what credentialed
+				// CORS requires; it is on the allowlist, so this is safe.
+				h.Set("Access-Control-Allow-Origin", origin)
 				h.Set("Access-Control-Allow-Credentials", "true")
 				if isPreflight {
 					h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
